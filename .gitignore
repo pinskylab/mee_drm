@@ -1,0 +1,125 @@
+#--- hack to ignore stan executables ----
+# !stan_models
+# !stan_models/*.stan
+# !stan_models/utils
+# stan_models/*
+
+data/satellite/summer/*.h5
+data/satellite/winter/*.h5
+
+data/satellite/nlcd/*.tiff
+data/satellite/nlcd/*.zip
+  
+overleaf
+    
+stan_models/*.rds
+
+data/cmdstan_outfiles/*
+  
+data/aux-*
+
+data/hdist.rds
+    
+*~
+*.RData
+# *.rds
+*.dat
+*.Rproj
+*.aux
+*.glo
+*.idx
+*.log
+*.toc
+*.ist
+*.acn
+*.acr
+*.alg
+*.bbl
+*.blg
+*.dvi
+*.glg
+*.gls
+*.ilg
+*.ind
+*.lof
+*.lot
+*.maf
+*.mtc
+*.mtc1
+*.out
+*.nav
+*.snm
+*.synctex.gz
+*.docx
+_region_.tex
+
+manuscript/*.pdf
+  
+main-blind*
+main-full*
+
+*.fls
+
+*.fdb_latexmk
+  
+*.sif
+
+.DS_Store
+
+## emacs files
+*~
+\#*\#
+/.emacs.desktop
+/.emacs.desktop.lock
+*.elc
+auto-save-list
+tramp
+.\#*
+
+# Org-mode
+.org-id-locations
+*_archive
+
+# flymake-mode
+*_flymake.*
+
+# eshell files
+/eshell/history
+/eshell/lastdir
+
+# elpa packages
+/elpa/
+
+# reftex files
+*.rel
+
+# AUCTeX auto folder
+manuscript/auto/*
+auto/*
+  
+# cask packages
+.cask/
+dist/
+
+# Flycheck
+flycheck_*.el
+
+# server auth directory
+/server/
+
+# projectiles files
+.projectile
+
+# directory configuration
+.dir-locals.el
+
+# files from marcos' computer
+.fuse_hidden*
+
+# quarto files
+reports/*_files/*
+reports/*_cache/*
+
+# large files
+data/results/linpred-*.rds
+data/results/ref-*.rds
