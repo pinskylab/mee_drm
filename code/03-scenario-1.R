@@ -78,9 +78,10 @@ pars <- list("alpha" = alpha_r,
              "tau" = tau,
              "coef_m" = betas_m,
              "coef_r" = betas_r,
-             "coef_t" = betas_t)
+             "coef_t" = betas_t,
+             "phi"    = phi)
 
-scen_1 <-
+scen1_dt <-
   model_sim(dat = data0,
             model = "drm",
             selectivity = data0$age_selectivity,
