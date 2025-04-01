@@ -209,7 +209,8 @@ drm_6 <-
           n_ages = NROW(f_train),
           f_mort = f_train,
           m = 0.25,
-          .toggles = list(time_ar = 1),
+          .toggles = list(time_ar = 1,
+                          est_surv = 1),
           init = "pathfinder")
 
 loos <- c(loos, list("drm_6" = drm_6$stanfit$loo()))
