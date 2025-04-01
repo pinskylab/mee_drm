@@ -5,6 +5,10 @@ library(sf)
 library(drmr)
 library(cmdstanr)
 
+fix_intercept <- function(beta0, beta1, beta2, offset) {
+  beta0 + offset * (beta2 - beta1)
+}
+
 ## loading data
 data(sum_fl)
 
@@ -12,6 +16,11 @@ data(sum_fl)
 map_name <- system.file("maps/sum_fl.shp", package = "drmr")
 
 polygons <- st_read(map_name)
+
+polygons |>
+  st_area() |>
+  units::set_units("km^2") |>
+  summary()
 
 ## instantaneous fishing mortality rates
 fmat <-
@@ -97,14 +106,6 @@ form_t <- ~ 1 +
   I(c_btemp * c_stemp) ## +
 ## as.factor(patch)
 
-x_m <- model.matrix(form_m,
-                    data = dat_train)
-x_r <- model.matrix(form_r,
-                    data = dat_train)
-
-x_t <- model.matrix(form_t,
-                    data = dat_train)
-
 ## adj_mat <- gen_adj(st_buffer(st_geometry(filter(polygons,
 ##                                                 patch <= 8)),
 adj_mat <- gen_adj(st_buffer(st_geometry(polygons),
@@ -119,18 +120,34 @@ cores <- 4
 
 ##--- fitting SDM (with movement and F) ----
 
-mcmc_drm <-
+drm_0 <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
-          site_col = "patch", ## vector of patches
-          f_mort = f_train,
-          n_ages = NROW(f_train), ## number of age groups
+          site_col = "patch",
           family = "gamma",
-          seed = 2025,
+          seed = 202505)
+
+
+drm_1 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch", 
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          init = "pathfinder")
+
+drm_1 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch", 
+          seed = 202505,
           ## adj_mat = adj_mat,
-          formula_zero = form_t,
-          formula_rec = form_r,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
           formula_surv = form_m,
           ## ages_movement = 3, ## age at which fish are able to move
           iter_sampling = 1000, ## number of samples after warmup
@@ -141,7 +158,7 @@ mcmc_drm <-
           .toggles = list(time_ar = 1,
                           movement = 0,
                           est_mort = 0),
-          .priors = list(pr_alpha_a = 5, pr_alpha_b = 5))
+          .priors = list(pr_phi_a = 1.2 * 2, pr_phi_b = 2))
 
 ##--- * MCMC diagnostics ----
 
@@ -150,25 +167,28 @@ viz_pars <-
     "alpha[1]",
     "phi[1]")
 
-mcmc_trace(mcmc_drm$draws$draws(variables = viz_pars))
-mcmc_dens_overlay(mcmc_drm$draws$draws(variables = viz_pars))
 
-mcmc_trace(mcmc_drm$draws$draws(variables = c("coef_r")))
-mcmc_dens_overlay(mcmc_drm$draws$draws(variables = c("coef_r")))
+mcmc_trace(mcmc_drm$stanfit$stanfit(variables = viz_pars))
+mcmc_dens_overlay(mcmc_drm$stanfit$draws(variables = viz_pars))
 
-mcmc_trace(mcmc_drm$draws$draws(variables = c("coef_t")))
-mcmc_dens_overlay(mcmc_drm$draws$draws(variables = c("coef_t")))
+mcmc_trace(mcmc_drm$stanfit$draws(variables = c("coef_r")))
+mcmc_dens_overlay(mcmc_drm$stanfit$draws(variables = c("coef_r")))
+
+mcmc_trace(mcmc_drm$stanfit$draws(variables = c("coef_t")))
+mcmc_dens_overlay(mcmc_drm$stanfit$draws(variables = c("coef_t")))
 
 ##--- comparing models ----
 
-loo_drm <- mcmc_drm$draws$loo()
+loo_drm <- mcmc_drm$stanfit$loo()
 
 ##--- estimated relationship between recruitment and temperature ----
+
+## * make this into a function!
 
 ## recruitment
 
 rec_coefs <-
-  mcmc_drm$draws$draws(variables =
+  mcmc_drm$stanfit$draws(variables =
                          c("coef_r"),
                        format = "draws_matrix")
 
@@ -180,16 +200,18 @@ quantile(y_max, probs = c(.05, .5, .95))
 
 rec_coefs <- rec_coefs |>
   as_tibble() |>
-  mutate(beta_1 = fix_linbeta(`coef_r[2]`, `coef_r[3]`,
+  mutate(beta_0 = fix_intercept(`coef_r[1]`, `coef_r[2]`, `coef_r[3]`,
+                                offset = avgs["stemp"]),
+         beta_1 = fix_linbeta(`coef_r[2]`, `coef_r[3]`,
                               offset = avgs["stemp"]),
          beta_2 = `coef_r[3]`) |>
-  select(beta_1:beta_2) |>
+  select(beta_0:beta_2) |>
   posterior::as_draws_matrix()
 
 temps <- seq(from = quantile(dat_train$c_stemp + avgs["stemp"], .05),
              to = quantile(dat_train$c_stemp + avgs["stemp"], .95),
              length.out = 200)
-x_aux <- model.matrix(~ 0 + temps + I(temps^2))
+x_aux <- model.matrix(~ 1 + temps + I(temps^2))
 
 dim(x_aux)
 dim(rec_coefs)
@@ -243,23 +265,22 @@ to_plot |>
 
 ##--- * DRM ----
 
-x_tt <- model.matrix(form_t,
-                     data = dat_test)
-x_mt <- model.matrix(form_m,
-                     data = dat_test)
-x_rt <- model.matrix(form_r,
-                     data = dat_test)
-
-x_mpast <-
-  model.matrix(form_m,
-               data = filter(dat_train, year == max(year)))
-
-forecast_drm <- predict_drm(drm = mcmc_drm$draws,
-                            drm_data = mcmc_drm$data,
+forecast_drm <- predict_drm(drm = mcmc_drm,
                             ntime_for =
                               length(unique(dat_test$year)),
-                            x_tt = x_tt,
-                            x_rt = x_rt,
+                            new_data = dat_test,
                             f_test = f_test[, -1],
                             seed = 125,
                             cores = 4)
+
+##--- * SDM ----
+
+forecast_sdm <-
+  predict_sdm(sdm = mcmc_sdm,
+              ntime_for =
+                length(unique(dat_test$year)),
+              time_for = dat_test$year,
+              new_data = dat_test,
+              seed = 125,
+              cores = 4)
+
