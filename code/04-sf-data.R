@@ -22,11 +22,6 @@ polygons |>
   units::set_units("km^2") |>
   summary()
 
-## instantaneous fishing mortality rates
-fmat <-
-  system.file("fmat.rds", package = "drmr") |>
-  readRDS()
-
 ##--- splitting data for validation ----
 
 ## reserving 5 years for forecast assessment
@@ -36,12 +31,9 @@ first_year_forecast <- max(sum_fl$year) - 5
 first_id_forecast <-
   first_year_forecast - min(sum_fl$year) + 1
 
-years_all <- seq_len(NCOL(fmat))
+years_all <- order(unique(sum_fl$year))
 years_train <- years_all[years_all < first_id_forecast]
 years_test <- years_all[years_all >= first_id_forecast]
-
-f_train <- fmat[, years_train]
-f_test  <- fmat[, years_test]
 
 dat_test <- sum_fl |>
   filter(year >= first_year_forecast)
@@ -90,31 +82,6 @@ dat_test <- dat_test |>
   mutate(dens = 1000 * y / area_km2,
          .before = y)
 
-##--- using function to prepare data for stan ----
-
-form_m <- ~ 1 # + btemp + I(btemp * btemp)
-form_r <- ~ 1 +
-  c_stemp +
-  I(c_stemp * c_stemp) ## +
-## as.factor(patch)
-form_t <- ~ 1 +
-  c_hauls + 
-  c_btemp +
-  I(c_btemp * c_btemp) +
-  c_stemp +
-  I(c_stemp * c_stemp) +
-  I(c_btemp * c_stemp) ## +
-## as.factor(patch)
-
-## adj_mat <- gen_adj(st_buffer(st_geometry(filter(polygons,
-##                                                 patch <= 8)),
-adj_mat <- gen_adj(st_buffer(st_geometry(polygons),
-                             dist = 2500))
-
-## row-standardized matrix
-adj_mat <-
-  t(apply(adj_mat, 1, \(x) x / (sum(x))))
-
 chains <- 4
 cores <- 4
 
@@ -125,40 +92,145 @@ drm_0 <-
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
           site_col = "patch",
-          family = "gamma",
           seed = 202505)
 
-
 drm_1 <-
   fit_drm(.data = dat_train,
-          y_col = "dens", ## response variable: density
-          time_col = "year", ## vector of time points
-          site_col = "patch", 
+          y_col = "dens",
+          time_col = "year",
+          site_col = "patch",
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
           formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          m = 0.25,
           init = "pathfinder")
 
-drm_1 <-
+drm_2 <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
-          site_col = "patch", 
+          site_col = "patch",
           seed = 202505,
-          ## adj_mat = adj_mat,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
           formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
-          formula_surv = form_m,
-          ## ages_movement = 3, ## age at which fish are able to move
-          iter_sampling = 1000, ## number of samples after warmup
-          iter_warmup = 1000, ## number of warmup samples
-          parallel_chains = cores,
-          init = "pathfinder",
-          chains = chains,
+          formula_surv = ~ 1,
+          .toggles = list(est_surv = 1),
+          init = "pathfinder")
+
+drm_3 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_surv = ~ 1,
+          .toggles = list(est_surv = 1,
+                          time_ar = 1),
+          init = "pathfinder")
+
+loos <- list("drm_0" = drm_0$stanfit$loo(),
+             "drm_1" = drm_1$stanfit$loo(),
+             "drm_2" = drm_2$stanfit$loo(),
+             "drm_3" = drm_3$stanfit$loo())
+
+loo::loo_compare(loos)
+
+adj_mat <- gen_adj(st_buffer(st_geometry(polygons),
+                             dist = 2500))
+
+## row-standardized matrix
+adj_mat <-
+  t(apply(adj_mat, 1, \(x) x / (sum(x))))
+
+drm_4 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          family = "gamma",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_surv = ~ 1,
+          n_ages = 6,
+          adj_mat = adj_mat, ## A matrix for movement routine
+          ages_movement = c(0, 0, 1, 1, 1, 0), ## ages allowed to move
+          .toggles = list(est_surv = 1,
+                          time_ar = 1,
+                          movement = 1),
+          init = "pathfinder")
+
+drm_4$stanfit$summary(variables = c("phi", "alpha", "zeta",
+                                    "beta_r", "beta_s",
+                                    "beta_t"))
+
+loos <- c(loos, list("drm_4" = drm_4$stanfit$loo()))
+
+loo::loo_compare(loos)
+
+drm_5 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          family = "gamma",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_surv = ~ 1,
+          n_ages = 6,
+          .toggles = list(est_surv = 1,
+                          time_ar = 1),
+          init = "pathfinder")
+
+loos <- c(loos, list("drm_5" = drm_5$stanfit$loo()))
+
+loo::loo_compare(loos)
+
+## instantaneous fishing mortality rates
+fmat <-
+  system.file("fmat.rds", package = "drmr") |>
+  readRDS()
+
+f_train <- fmat[, years_train]
+f_test  <- fmat[, years_test]
+
+drm_6 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          family = "gamma",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          n_ages = NROW(f_train),
+          f_mort = f_train,
+          m = 0.25,
+          .toggles = list(time_ar = 1),
+          init = "pathfinder")
+
+loos <- c(loos, list("drm_6" = drm_6$stanfit$loo()))
+
+drm_7 <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          family = "gamma",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_rec = ~ 1,
+          formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
           .toggles = list(time_ar = 1,
-                          movement = 0,
-                          est_mort = 0),
-          .priors = list(pr_phi_a = 1.2 * 2, pr_phi_b = 2))
+                          est_surv = 1),
+          init = "pathfinder")
+
+loos <- c(loos, list("drm_7" = drm_7$stanfit$loo()))
+
+loo::loo_compare(loos)
 
 ##--- * MCMC diagnostics ----
 
@@ -167,120 +239,289 @@ viz_pars <-
     "alpha[1]",
     "phi[1]")
 
+mcmc_trace(drm_3$stanfit$draws(variables = viz_pars))
+mcmc_dens_overlay(drm_3$stanfit$draws(variables = viz_pars))
 
-mcmc_trace(mcmc_drm$stanfit$stanfit(variables = viz_pars))
-mcmc_dens_overlay(mcmc_drm$stanfit$draws(variables = viz_pars))
+mcmc_trace(drm_3$stanfit$draws(variables = c("beta_r")))
+mcmc_dens_overlay(drm_3$stanfit$draws(variables = c("beta_r")))
 
-mcmc_trace(mcmc_drm$stanfit$draws(variables = c("coef_r")))
-mcmc_dens_overlay(mcmc_drm$stanfit$draws(variables = c("coef_r")))
+mcmc_trace(drm_3$stanfit$draws(variables = c("beta_t")))
+mcmc_dens_overlay(drm_3$stanfit$draws(variables = c("beta_t")))
 
-mcmc_trace(mcmc_drm$stanfit$draws(variables = c("coef_t")))
-mcmc_dens_overlay(mcmc_drm$stanfit$draws(variables = c("coef_t")))
-
-##--- comparing models ----
-
-loo_drm <- mcmc_drm$stanfit$loo()
-
-##--- estimated relationship between recruitment and temperature ----
+##--- Viz relationships ----
 
 ## * make this into a function!
+## ** that is far from easy!
 
 ## recruitment
 
-rec_coefs <-
-  mcmc_drm$stanfit$draws(variables =
-                         c("coef_r"),
-                       format = "draws_matrix")
+newdata_rec <- data.frame(c_stemp =
+                            seq(from = quantile(dat_train$c_stemp, .05),
+                                to = quantile(dat_train$c_stemp, .95),
+                                length.out = 200))
 
-y_max <- max_quad_x(beta1 = rec_coefs[, 2],
-                    beta2 = rec_coefs[, 3],
-                    offset = avgs["stemp"])
+rec_samples <- marg_rec(drm_3, newdata_rec)
 
-quantile(y_max, probs = c(.05, .5, .95))
+rec_samples <- rec_samples |>
+  mutate(stemp = c_stemp + avgs["stemp"])
 
-rec_coefs <- rec_coefs |>
-  as_tibble() |>
-  mutate(beta_0 = fix_intercept(`coef_r[1]`, `coef_r[2]`, `coef_r[3]`,
-                                offset = avgs["stemp"]),
-         beta_1 = fix_linbeta(`coef_r[2]`, `coef_r[3]`,
-                              offset = avgs["stemp"]),
-         beta_2 = `coef_r[3]`) |>
-  select(beta_0:beta_2) |>
-  posterior::as_draws_matrix()
-
-temps <- seq(from = quantile(dat_train$c_stemp + avgs["stemp"], .05),
-             to = quantile(dat_train$c_stemp + avgs["stemp"], .95),
-             length.out = 200)
-x_aux <- model.matrix(~ 1 + temps + I(temps^2))
-
-dim(x_aux)
-dim(rec_coefs)
-
-rec_estimates <-
-  tcrossprod(rec_coefs, x_aux)
-
-rec_estimates <- exp(c(rec_estimates))
-
-rec_estimates <-
-  tibble(temperature = c(sapply(temps, \(x) rep(x, nrow(rec_coefs)))),
-         mortality   = rec_estimates)
-
-to_plot <-
-  rec_estimates |>
-  group_by(temperature) |>
-  summarise(ll = quantile(mortality, probs = .05),
-            l = quantile(mortality, probs = .1),
-            m = median(mortality),
-            u = quantile(mortality, probs = .9),
-            uu = quantile(mortality, probs = .95)) |>
+rec_summary <-
+  rec_samples |>
+  group_by(stemp) |>
+  summarise(ll = quantile(recruitment, probs = .05),
+            l = quantile(recruitment, probs = .1),
+            m = median(recruitment),
+            u = quantile(recruitment, probs = .9),
+            uu = quantile(recruitment, probs = .95)) |>
   ungroup()
 
-to_plot2 <- to_plot |>
-  filter(temperature <= quantile(y_max, probs = .75),
-         temperature >= quantile(y_max, probs = .25))
-
-to_plot |>
-  ggplot(data = ,
-         aes(x = temperature,
-             y = m)) +
-  ## geom_ribbon(aes(ymin = l, ymax = u),
-  ##             fill = 2,
-  ##             alpha = .2) +
-  ## geom_ribbon(aes(ymin = ll, ymax = uu),
-  ##             fill = 2,
-  ##             alpha = .2) +
-  geom_area(data = to_plot2,
-            fill = 4, alpha = .3) +
-  annotate("segment",
-           x = quantile(y_max, probs = .5),
-           y = 0, yend = max(to_plot$m),
-           col = 4, lty = 2, lwd = 1.2) +
-  geom_line() +
-  labs(y = "Recruitment",
-       x = "Temperature") +
+set.seed(1111)
+rec_samples |>
+  group_by(stemp) |>
+  sample_n(size = 200) |>
+  ungroup() |>
+  ggplot(data = _,
+       aes(x = stemp,
+           y = recruitment,
+           group = iter)) +
+  geom_ribbon(data = rec_summary,
+              aes(x = stemp,
+                  ymin = l, ymax = u),
+              inherit.aes = FALSE,
+              fill = 2,
+              alpha = .2,
+              linewidth = 1.2) +
+  geom_ribbon(data = rec_summary,
+              aes(x = stemp,
+                  ymin = ll, ymax = uu),
+              inherit.aes = FALSE,
+              fill = 2,
+              alpha = .2,
+              linewidth = 1.2) +
+  geom_line(alpha = .05) +
+  geom_line(data = rec_summary,
+            aes(x = stemp, y = m),
+            inherit.aes = FALSE,
+            color = 2,
+            linewidth = 1.2) +
   theme_bw()
 
+##--- * survival ----
+
+newdata_surv <- data.frame(c_btemp =
+                             seq(from = quantile(dat_train$c_btemp, .05),
+                                 to = quantile(dat_train$c_btemp, .95),
+                                 length.out = 200))
+
+surv_samples <- marg_surv(drm_7, newdata_surv)
+
+surv_samples <- surv_samples |>
+  mutate(btemp = c_btemp + avgs["btemp"])
+
+surv_summary <-
+  surv_samples |>
+  group_by(btemp) |>
+  summarise(ll = quantile(survival, probs = .05),
+            l = quantile(survival, probs = .1),
+            m = median(survival),
+            u = quantile(survival, probs = .9),
+            uu = quantile(survival, probs = .95)) |>
+  ungroup()
+
+set.seed(1111)
+surv_samples |>
+  group_by(btemp) |>
+  sample_n(size = 200) |>
+  ungroup() |>
+  ggplot(data = _,
+       aes(x = btemp,
+           y = survival,
+           group = iter)) +
+  geom_ribbon(data = surv_summary,
+              aes(x = btemp,
+                  ymin = l, ymax = u),
+              inherit.aes = FALSE,
+              fill = 2,
+              alpha = .2,
+              linewidth = 1.2) +
+  geom_ribbon(data = surv_summary,
+              aes(x = btemp,
+                  ymin = ll, ymax = uu),
+              inherit.aes = FALSE,
+              fill = 2,
+              alpha = .2,
+              linewidth = 1.2) +
+  geom_line(alpha = .05) +
+  geom_line(data = surv_summary,
+            aes(x = btemp, y = m),
+            inherit.aes = FALSE,
+            color = 2,
+            linewidth = 1.2) +
+  theme_bw()
+
+##--- * prob of absence ----
+
+newdata_abs <- expand.grid(c_hauls = 0,
+                           c_btemp =
+                             seq(from = quantile(dat_train$c_btemp, .05),
+                                 to = quantile(dat_train$c_btemp, .95),
+                                 length.out = 20),
+                           c_stemp =
+                             seq(from = quantile(dat_train$c_stemp, .05),
+                                 to = quantile(dat_train$c_stemp, .95),
+                                 length.out = 20))
+
+abs_samples <- marg_pabs(drm_3, newdata_abs)
+
+abs_samples <- abs_samples |>
+  mutate(btemp = c_btemp + avgs["btemp"]) |>
+  mutate(stemp = c_stemp + avgs["stemp"])
+
+abs_summary <-
+  abs_samples |>
+  group_by(btemp, stemp, c_hauls) |>
+  summarise(ll = quantile(prob_abs, probs = .05),
+            l = quantile(prob_abs, probs = .1),
+            m = median(prob_abs),
+            u = quantile(prob_abs, probs = .9),
+            uu = quantile(prob_abs, probs = .95)) |>
+  ungroup()
+
+ggplot(data = abs_summary,
+       aes(x = btemp,
+           y = stemp,
+           fill = m)) +
+  geom_raster() +
+  scale_fill_viridis_c(option = "H") +
+  theme_bw()
 
 ##--- forecasting ----
 
 ##--- * DRM ----
 
-forecast_drm <- predict_drm(drm = mcmc_drm,
-                            ntime_for =
-                              length(unique(dat_test$year)),
-                            new_data = dat_test,
-                            f_test = f_test[, -1],
-                            seed = 125,
-                            cores = 4)
+forecast_0 <- predict_drm(drm = drm_0,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          seed = 125,
+                          cores = 4)
 
-##--- * SDM ----
+forecast_1 <- predict_drm(drm = drm_1,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          seed = 125,
+                          cores = 4)
 
-forecast_sdm <-
-  predict_sdm(sdm = mcmc_sdm,
-              ntime_for =
-                length(unique(dat_test$year)),
-              time_for = dat_test$year,
-              new_data = dat_test,
-              seed = 125,
-              cores = 4)
+forecast_2 <- predict_drm(drm = drm_2,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
 
+forecast_3 <- predict_drm(drm = drm_3,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_4 <- predict_drm(drm = drm_4,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_5 <- predict_drm(drm = drm_5,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_6 <- predict_drm(drm = drm_6,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          f_test = f_test,
+                          seed = 125,
+                          cores = 4)
+
+forecast_7 <- predict_drm(drm = drm_7,
+                          ntime_for =
+                            length(unique(dat_test$year)),
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+##--- * obtaining the summary for predictions ----
+
+all_forecasts <-
+  ls(pattern = "^forecast_")
+all_drms <-
+  ls(pattern = "^drm_")
+
+forecasts_summary <-
+  Map(f = \(x, nm) {
+    fct <- get(x)
+    fct$draws(variables = "y_proj",
+              format = "draws_df") |>
+      tidyr::pivot_longer(cols = starts_with("y_proj"),
+                          names_to = "pair",
+                          values_to = "expected") |>
+      group_by(pair) |>
+      summarise(ll = quantile(expected, probs = .05),
+                l = quantile(expected, probs = .1),
+                m = median(expected),
+                u = quantile(expected, probs = .9),
+                uu = quantile(expected, probs = .95)) |>
+      ungroup() |>
+      mutate(pair = gsub("\\D", "", pair)) |>
+      mutate(pair = as.integer(pair)) |>
+      arrange(pair) |>
+      mutate(model = nm,
+             .before = 1)
+  }, x = all_forecasts, nm = all_drms)
+
+
+forecasts_summary <-
+  bind_rows(forecasts_summary)
+
+forecasts_summary <-
+  dat_test |>
+  select(dens, lat_floor, patch, year) |>
+  mutate(pair = row_number()) |>
+  left_join(forecasts_summary, by = "pair")
+
+forecasts_summary |>
+  mutate(bias = dens - m) |>
+  mutate(rmse = bias * bias) |>
+  mutate(abias = abs(bias)) |>
+  mutate(is1 = int_score(dens, l = ll, u = uu, alpha = .1)) |>
+  mutate(is2 = int_score(dens, l = l, u = u, alpha = .2)) |>
+  mutate(cvg1 = data.table::between(dens, ll, uu)) |>
+  mutate(cvg2 = data.table::between(dens, l, u)) |>
+  ungroup() |>
+  group_by(model) |>
+  summarise(across(bias:cvg2, mean)) |>
+  ungroup() |>
+  rename_all(toupper) |>
+  rename("Model" = "MODEL",
+         "IS (90%)" = "IS1",
+         "IS (80%)" = "IS2",
+         "PIC (90%)" = "CVG1",
+         "PIC (80%)" = "CVG2")
