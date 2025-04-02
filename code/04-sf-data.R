@@ -206,6 +206,7 @@ drm_6 <-
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
           formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_surv = ~ 1,
           n_ages = NROW(f_train),
           f_mort = f_train,
           m = 0.25,
@@ -525,4 +526,9 @@ forecasts_summary |>
          "IS (90%)" = "IS1",
          "IS (80%)" = "IS2",
          "PIC (90%)" = "CVG1",
-         "PIC (80%)" = "CVG2")
+         "PIC (80%)" = "CVG2") |>
+  arrange(RMSE) |>
+  print() |>
+  xtable::xtable(caption = "Forecasting skill according to different metrics",
+                 digits = 2) |>
+  print(include.rownames = FALSE)
