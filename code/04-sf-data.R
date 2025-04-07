@@ -112,8 +112,9 @@ drm_2 <-
           site_col = "patch",
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
-          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_rec = ~ 1 + c_stemp + c_stemp * c_stemp,
           formula_surv = ~ 1,
+          m = 0,
           .toggles = list(est_surv = 1),
           init = "pathfinder")
 
@@ -291,14 +292,14 @@ rec_samples |>
                   ymin = l, ymax = u),
               inherit.aes = FALSE,
               fill = 2,
-              alpha = .2,
+              alpha = .4,
               linewidth = 1.2) +
   geom_ribbon(data = rec_summary,
               aes(x = stemp,
                   ymin = ll, ymax = uu),
               inherit.aes = FALSE,
               fill = 2,
-              alpha = .2,
+              alpha = .4,
               linewidth = 1.2) +
   geom_line(alpha = .05) +
   geom_line(data = rec_summary,
@@ -344,14 +345,14 @@ surv_samples |>
                   ymin = l, ymax = u),
               inherit.aes = FALSE,
               fill = 2,
-              alpha = .2,
+              alpha = .4,
               linewidth = 1.2) +
   geom_ribbon(data = surv_summary,
               aes(x = btemp,
                   ymin = ll, ymax = uu),
               inherit.aes = FALSE,
               fill = 2,
-              alpha = .2,
+              alpha = .4,
               linewidth = 1.2) +
   geom_line(alpha = .05) +
   geom_line(data = surv_summary,
@@ -499,7 +500,6 @@ forecasts_summary <-
              .before = 1)
   }, x = all_forecasts, nm = all_drms)
 
-
 forecasts_summary <-
   bind_rows(forecasts_summary)
 
@@ -532,3 +532,16 @@ forecasts_summary |>
   xtable::xtable(caption = "Forecasting skill according to different metrics",
                  digits = 2) |>
   print(include.rownames = FALSE)
+
+ggplot(data = forecasts_summary,
+       aes(x = year,
+           y = m)) +
+  geom_ribbon(aes(ymin = l, ymax = u),
+              fill = 2,
+              alpha = .4) +
+  geom_line() +
+  geom_point(aes(y = dens),
+             color = 4) +
+  facet_grid(patch ~ model,
+             scales = "free_y") +
+  theme_bw()
