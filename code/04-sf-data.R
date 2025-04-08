@@ -3,6 +3,7 @@ library(ggplot2)
 library(bayesplot)
 library(sf)
 library(drmr)
+library(patchwork)
 library(cmdstanr)
 
 ## loading data
@@ -21,7 +22,7 @@ polygons |>
 ##--- splitting data for validation ----
 
 ## reserving 5 years for forecast assessment
-first_year_forecast <- max(sum_fl$year) - 5
+first_year_forecast <- max(sum_fl$year) - 4
 
 ## "year to id"
 first_id_forecast <-
@@ -326,7 +327,7 @@ forecasts_summary <-
   mutate(pair = row_number()) |>
   left_join(forecasts_summary, by = "pair")
 
-## Table?
+## Table 5
 
 forecasts_summary |>
   mutate(bias = dens - m) |>
@@ -350,7 +351,12 @@ forecasts_summary |>
                  digits = 2) |>
   print(include.rownames = FALSE)
 
-ggplot(data = forecasts_summary,
+## Figure 1 with selected models' forecast
+
+ggplot(data = filter(forecasts_summary,
+                     model %in% c("drm_3",
+                                  "drm_4",
+                                  "drm_7")),
        aes(x = year,
            y = m)) +
   geom_ribbon(aes(ymin = l, ymax = u),
@@ -359,9 +365,19 @@ ggplot(data = forecasts_summary,
   geom_line() +
   geom_point(aes(y = dens),
              color = 4) +
-  facet_grid(patch ~ model,
+  facet_grid(rev(patch) ~ model,
              scales = "free_y") +
-  theme_bw()
+  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
+                                                   n = 3)) +
+  theme_bw() +
+  labs(x = "Year",
+       y = "Predicted density") +
+  theme(panel.spacing.y = unit(.125, "in"),
+        axis.text.x = element_text(angle = 30))
+
+ggsave(filename = "overleaf/img/forecasts.pdf",
+       width = 6,
+       height = 8)
 
 ##--- * MCMC diagnostics ----
 
@@ -391,51 +407,81 @@ newdata_rec <- data.frame(c_stemp =
                                 to = quantile(dat_train$c_stemp, .95),
                                 length.out = 200))
 
-rec_samples <- marg_rec(drm_3, newdata_rec)
+rec_samples_3 <- marg_rec(drm_3, newdata_rec)
 
-rec_samples <- rec_samples |>
+rec_samples_3 <- rec_samples_3 |>
+  mutate(stemp = c_stemp + avgs["stemp"])
+
+rec_samples_4 <- marg_rec(drm_4, newdata_rec)
+
+rec_samples_4 <- rec_samples_4 |>
   mutate(stemp = c_stemp + avgs["stemp"])
 
 rec_summary <-
-  rec_samples |>
+  rec_samples_3 |>
   group_by(stemp) |>
   summarise(ll = quantile(recruitment, probs = .05),
             l = quantile(recruitment, probs = .1),
             m = median(recruitment),
             u = quantile(recruitment, probs = .9),
             uu = quantile(recruitment, probs = .95)) |>
-  ungroup()
-
-set.seed(1111)
-rec_samples |>
-  group_by(stemp) |>
-  sample_n(size = 200) |>
   ungroup() |>
-  ggplot(data = _,
-       aes(x = stemp,
-           y = recruitment,
-           group = iter)) +
-  geom_ribbon(data = rec_summary,
-              aes(x = stemp,
-                  ymin = l, ymax = u),
-              inherit.aes = FALSE,
-              fill = 2,
+  mutate(model = "drm_3") |>
+  bind_rows(
+      rec_samples_4 |>
+      group_by(stemp) |>
+      summarise(ll = quantile(recruitment, probs = .05),
+                l = quantile(recruitment, probs = .1),
+                m = median(recruitment),
+                u = quantile(recruitment, probs = .9),
+                uu = quantile(recruitment, probs = .95)) |>
+      ungroup() |>
+      mutate(model = "drm_4")
+  )
+
+rec_fig <-
+  ggplot(data = rec_summary,
+         aes(x = stemp,
+             y = m,
+             color = model,
+             fill = model)) +
+  geom_ribbon(aes(ymin = l, ymax = u),
               alpha = .4,
+              color = "transparent",
               linewidth = 1.2) +
-  geom_ribbon(data = rec_summary,
-              aes(x = stemp,
-                  ymin = ll, ymax = uu),
-              inherit.aes = FALSE,
-              fill = 2,
-              alpha = .4,
-              linewidth = 1.2) +
-  geom_line(alpha = .05) +
-  geom_line(data = rec_summary,
-            aes(x = stemp, y = m),
-            inherit.aes = FALSE,
-            color = 2,
-            linewidth = 1.2) +
-  theme_bw()
+  geom_line(linewidth = 1.2) +
+  theme_bw() +
+  guides(fill = "none") +
+  labs(color = "Model",
+       fill = "Model",
+       x = "SST (in Celsius)",
+       y = "Est. recruitment (per km2)") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(0.175, 0.75))
+
+gratio <- 0.5 * (1 + sqrt(5))
+
+ggsave(filename = "overleaf/img/recruitment.pdf",
+       width = 6,
+       height = 6 / gratio)
+
+##--- ** obtaining the SST that maximizes the recruitment ----
+
+betas_r_3 <-
+  drm_3$stanfit$draws(variables = "beta_r",
+                      format = "matrix")
+
+max_quad_x(betas_r_3[, 2], betas_r_3[, 3],
+           offset = avgs["stemp"]) |>
+  apply(2, quantile, probs = c(.1, .5, .9))
+
+betas_r_4 <-
+  drm_4$stanfit$draws(variables = "beta_r",
+                      format = "matrix")
+
+max_quad_x(betas_r_4[, 2], betas_r_4[, 3],
+           offset = avgs["stemp"]) |>
+  apply(2, quantile, probs = c(.1, .5, .9))
 
 ##--- * survival ----
 
@@ -459,36 +505,44 @@ surv_summary <-
             uu = quantile(survival, probs = .95)) |>
   ungroup()
 
-set.seed(1111)
-surv_samples |>
-  group_by(btemp) |>
-  sample_n(size = 200) |>
-  ungroup() |>
-  ggplot(data = _,
-       aes(x = btemp,
-           y = survival,
-           group = iter)) +
-  geom_ribbon(data = surv_summary,
-              aes(x = btemp,
-                  ymin = l, ymax = u),
-              inherit.aes = FALSE,
-              fill = 2,
+surv_fig <-
+  ggplot(data = surv_summary,
+         aes(x = btemp,
+             y = m)) +
+  geom_ribbon(aes(ymin = l, ymax = u),
               alpha = .4,
-              linewidth = 1.2) +
-  geom_ribbon(data = surv_summary,
-              aes(x = btemp,
-                  ymin = ll, ymax = uu),
-              inherit.aes = FALSE,
+              color = "transparent",
               fill = 2,
-              alpha = .4,
               linewidth = 1.2) +
-  geom_line(alpha = .05) +
-  geom_line(data = surv_summary,
-            aes(x = btemp, y = m),
-            inherit.aes = FALSE,
-            color = 2,
-            linewidth = 1.2) +
-  theme_bw()
+  geom_line(linewidth = 1.2) +
+  theme_bw() +
+  labs(x = "SBT (in Celsius)",
+       y = "Est. survival")
+
+ggsave(filename = "overleaf/img/surv.pdf",
+       plot = surv_fig,
+       width = 6,
+       height = 6 / gratio)
+
+##--- ** obtaining the SBT that maximizes surival ----
+
+betas_s_7 <-
+  drm_7$stanfit$draws(variables = "beta_s",
+                      format = "matrix")
+
+max_quad_x(betas_s_7[, 2], betas_s_7[, 3],
+           offset = avgs["stemp"]) |>
+  apply(2, quantile, probs = c(.1, .5, .9))
+
+##--- Panel for recruitment and survival ----
+
+rec_fig + surv_fig +
+  plot_annotation(tag_levels = "A") &
+  theme(plot.tag = element_text(size = 10))
+
+ggsave(filename = "overleaf/img/rec_surv.pdf",
+       width = 7,
+       height = .75 * 7 / gratio)
 
 ##--- * prob of absence ----
 
@@ -525,4 +579,3 @@ ggplot(data = abs_summary,
   geom_raster() +
   scale_fill_viridis_c(option = "H") +
   theme_bw()
-
