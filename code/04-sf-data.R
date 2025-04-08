@@ -5,10 +5,6 @@ library(sf)
 library(drmr)
 library(cmdstanr)
 
-fix_intercept <- function(beta0, beta1, beta2, offset) {
-  beta0 + offset * (beta2 - beta1)
-}
-
 ## loading data
 data(sum_fl)
 
@@ -72,7 +68,7 @@ dat_test <- dat_test |>
          c_lon   = lon - avgs["lon"],
          time  = year - min_year)
 
-##--- turning response into density: individuals pear km2 per haul ----
+##--- turning response into density: 1k individuals per km2 ----
 
 dat_train <- dat_train |>
   mutate(dens = 1000 * y / area_km2,
@@ -87,7 +83,7 @@ cores <- 4
 
 ##--- fitting SDM (with movement and F) ----
 
-drm_0 <-
+baseline <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
@@ -131,13 +127,6 @@ drm_3 <-
                           time_ar = 1),
           init = "pathfinder")
 
-loos <- list("drm_0" = drm_0$stanfit$loo(),
-             "drm_1" = drm_1$stanfit$loo(),
-             "drm_2" = drm_2$stanfit$loo(),
-             "drm_3" = drm_3$stanfit$loo())
-
-loo::loo_compare(loos)
-
 adj_mat <- gen_adj(st_buffer(st_geometry(polygons),
                              dist = 2500))
 
@@ -167,9 +156,6 @@ drm_4$stanfit$summary(variables = c("phi", "alpha", "zeta",
                                     "beta_r", "beta_s",
                                     "beta_t"))
 
-loos <- c(loos, list("drm_4" = drm_4$stanfit$loo()))
-
-loo::loo_compare(loos)
 
 drm_5 <-
   fit_drm(.data = dat_train,
@@ -185,10 +171,6 @@ drm_5 <-
           .toggles = list(est_surv = 1,
                           time_ar = 1),
           init = "pathfinder")
-
-loos <- c(loos, list("drm_5" = drm_5$stanfit$loo()))
-
-loo::loo_compare(loos)
 
 ## instantaneous fishing mortality rates
 fmat <-
@@ -210,12 +192,9 @@ drm_6 <-
           formula_surv = ~ 1,
           n_ages = NROW(f_train),
           f_mort = f_train,
-          m = 0.25,
           .toggles = list(time_ar = 1,
                           est_surv = 1),
           init = "pathfinder")
-
-loos <- c(loos, list("drm_6" = drm_6$stanfit$loo()))
 
 drm_7 <-
   fit_drm(.data = dat_train,
@@ -231,9 +210,158 @@ drm_7 <-
                           est_surv = 1),
           init = "pathfinder")
 
-loos <- c(loos, list("drm_7" = drm_7$stanfit$loo()))
+loos <- list("baseline" = baseline$stanfit$loo(),
+             "drm_1" = drm_1$stanfit$loo(),
+             "drm_2" = drm_2$stanfit$loo(),
+             "drm_3" = drm_3$stanfit$loo(),
+             "drm_4" = drm_4$stanfit$loo(),
+             "drm_5" = drm_5$stanfit$loo(),
+             "drm_6" = drm_6$stanfit$loo(),
+             "drm_7" = drm_7$stanfit$loo())
 
-loo::loo_compare(loos)
+loos_out <- loo::loo_compare(loos)
+
+##--- * some quantities for model comparison ----
+
+times <- ls(pattern = "^(drm|baseline)") |>
+  sapply(\(x) get(x)$stanfit$time()$total)
+
+aux_qt <-
+  data.frame(Model = names(times),
+             LOOIC = loos_out[order(rownames(loos_out)), 1],
+             time = times)
+
+##--- forecasting ----
+
+##--- * DRM ----
+
+forecast_0 <- predict_drm(drm = baseline,
+                          new_data = dat_test,
+                          seed = 125,
+                          cores = 4)
+
+forecast_1 <- predict_drm(drm = drm_1,
+                          new_data = dat_test,
+                          seed = 125,
+                          cores = 4)
+
+forecast_2 <- predict_drm(drm = drm_2,
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_3 <- predict_drm(drm = drm_3,
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_4 <- predict_drm(drm = drm_4,
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_5 <- predict_drm(drm = drm_5,
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+forecast_6 <- predict_drm(drm = drm_6,
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          f_test = f_test,
+                          seed = 125,
+                          cores = 4)
+
+forecast_7 <- predict_drm(drm = drm_7,
+                          new_data = dat_test,
+                          past_data = filter(dat_train,
+                                             year == max(year)),
+                          seed = 125,
+                          cores = 4)
+
+##--- * obtaining the summary for predictions ----
+
+all_forecasts <-
+  ls(pattern = "^forecast_")
+all_drms <-
+  ls(pattern = "^(baseline|drm_)")
+
+forecasts_summary <-
+  Map(f = \(x, nm) {
+    fct <- get(x)
+    fct$draws(variables = "y_proj",
+              format = "draws_df") |>
+      tidyr::pivot_longer(cols = starts_with("y_proj"),
+                          names_to = "pair",
+                          values_to = "expected") |>
+      group_by(pair) |>
+      summarise(ll = quantile(expected, probs = .05),
+                l = quantile(expected, probs = .1),
+                m = median(expected),
+                u = quantile(expected, probs = .9),
+                uu = quantile(expected, probs = .95)) |>
+      ungroup() |>
+      mutate(pair = gsub("\\D", "", pair)) |>
+      mutate(pair = as.integer(pair)) |>
+      arrange(pair) |>
+      mutate(model = nm,
+             .before = 1)
+  }, x = all_forecasts, nm = all_drms)
+
+forecasts_summary <-
+  bind_rows(forecasts_summary)
+
+forecasts_summary <-
+  dat_test |>
+  select(dens, lat_floor, patch, year) |>
+  mutate(pair = row_number()) |>
+  left_join(forecasts_summary, by = "pair")
+
+## Table?
+
+forecasts_summary |>
+  mutate(bias = dens - m) |>
+  mutate(rmse = bias * bias) |>
+  mutate(is = int_score(dens, l = l, u = u, alpha = .2)) |>
+  mutate(cvg = 100 * data.table::between(dens, l, u)) |>
+  ungroup() |>
+  group_by(model) |>
+  summarise(across(rmse:cvg, mean)) |>
+  ungroup() |>
+  rename_all(toupper) |>
+  rename("Model" = "MODEL",
+         "IS (80%)" = "IS",
+         "PIC (80%)" = "CVG") |>
+  left_join(aux_qt,
+            by = "Model") |>
+  arrange(desc(LOOIC)) |>
+  relocate(LOOIC, .after = "Model") |>
+  print() |>
+  xtable::xtable(caption = "Forecasting skill according to different metrics",
+                 digits = 2) |>
+  print(include.rownames = FALSE)
+
+ggplot(data = forecasts_summary,
+       aes(x = year,
+           y = m)) +
+  geom_ribbon(aes(ymin = l, ymax = u),
+              fill = 2,
+              alpha = .4) +
+  geom_line() +
+  geom_point(aes(y = dens),
+             color = 4) +
+  facet_grid(patch ~ model,
+             scales = "free_y") +
+  theme_bw()
 
 ##--- * MCMC diagnostics ----
 
@@ -398,150 +526,3 @@ ggplot(data = abs_summary,
   scale_fill_viridis_c(option = "H") +
   theme_bw()
 
-##--- forecasting ----
-
-##--- * DRM ----
-
-forecast_0 <- predict_drm(drm = drm_0,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          seed = 125,
-                          cores = 4)
-
-forecast_1 <- predict_drm(drm = drm_1,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          seed = 125,
-                          cores = 4)
-
-forecast_2 <- predict_drm(drm = drm_2,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          past_data = filter(dat_train,
-                                             year == max(year)),
-                          seed = 125,
-                          cores = 4)
-
-forecast_3 <- predict_drm(drm = drm_3,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          past_data = filter(dat_train,
-                                             year == max(year)),
-                          seed = 125,
-                          cores = 4)
-
-forecast_4 <- predict_drm(drm = drm_4,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          past_data = filter(dat_train,
-                                             year == max(year)),
-                          seed = 125,
-                          cores = 4)
-
-forecast_5 <- predict_drm(drm = drm_5,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          past_data = filter(dat_train,
-                                             year == max(year)),
-                          seed = 125,
-                          cores = 4)
-
-forecast_6 <- predict_drm(drm = drm_6,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          past_data = filter(dat_train,
-                                             year == max(year)),
-                          f_test = f_test,
-                          seed = 125,
-                          cores = 4)
-
-forecast_7 <- predict_drm(drm = drm_7,
-                          ntime_for =
-                            length(unique(dat_test$year)),
-                          new_data = dat_test,
-                          past_data = filter(dat_train,
-                                             year == max(year)),
-                          seed = 125,
-                          cores = 4)
-
-##--- * obtaining the summary for predictions ----
-
-all_forecasts <-
-  ls(pattern = "^forecast_")
-all_drms <-
-  ls(pattern = "^drm_")
-
-forecasts_summary <-
-  Map(f = \(x, nm) {
-    fct <- get(x)
-    fct$draws(variables = "y_proj",
-              format = "draws_df") |>
-      tidyr::pivot_longer(cols = starts_with("y_proj"),
-                          names_to = "pair",
-                          values_to = "expected") |>
-      group_by(pair) |>
-      summarise(ll = quantile(expected, probs = .05),
-                l = quantile(expected, probs = .1),
-                m = median(expected),
-                u = quantile(expected, probs = .9),
-                uu = quantile(expected, probs = .95)) |>
-      ungroup() |>
-      mutate(pair = gsub("\\D", "", pair)) |>
-      mutate(pair = as.integer(pair)) |>
-      arrange(pair) |>
-      mutate(model = nm,
-             .before = 1)
-  }, x = all_forecasts, nm = all_drms)
-
-forecasts_summary <-
-  bind_rows(forecasts_summary)
-
-forecasts_summary <-
-  dat_test |>
-  select(dens, lat_floor, patch, year) |>
-  mutate(pair = row_number()) |>
-  left_join(forecasts_summary, by = "pair")
-
-forecasts_summary |>
-  mutate(bias = dens - m) |>
-  mutate(rmse = bias * bias) |>
-  mutate(abias = abs(bias)) |>
-  mutate(is1 = int_score(dens, l = ll, u = uu, alpha = .1)) |>
-  mutate(is2 = int_score(dens, l = l, u = u, alpha = .2)) |>
-  mutate(cvg1 = data.table::between(dens, ll, uu)) |>
-  mutate(cvg2 = data.table::between(dens, l, u)) |>
-  ungroup() |>
-  group_by(model) |>
-  summarise(across(bias:cvg2, mean)) |>
-  ungroup() |>
-  rename_all(toupper) |>
-  rename("Model" = "MODEL",
-         "IS (90%)" = "IS1",
-         "IS (80%)" = "IS2",
-         "PIC (90%)" = "CVG1",
-         "PIC (80%)" = "CVG2") |>
-  arrange(RMSE) |>
-  print() |>
-  xtable::xtable(caption = "Forecasting skill according to different metrics",
-                 digits = 2) |>
-  print(include.rownames = FALSE)
-
-ggplot(data = forecasts_summary,
-       aes(x = year,
-           y = m)) +
-  geom_ribbon(aes(ymin = l, ymax = u),
-              fill = 2,
-              alpha = .4) +
-  geom_line() +
-  geom_point(aes(y = dens),
-             color = 4) +
-  facet_grid(patch ~ model,
-             scales = "free_y") +
-  theme_bw()
