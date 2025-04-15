@@ -82,7 +82,7 @@ dat_test <- dat_test |>
 chains <- 4
 cores <- 4
 
-##--- fitting SDM (with movement and F) ----
+##--- fitting DRMs ----
 
 baseline <-
   fit_drm(.data = dat_train,
@@ -211,6 +211,21 @@ drm_7 <-
                           est_surv = 1),
           init = "pathfinder")
 
+##--- * SDM ----
+
+sdm <-
+  fit_sdm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          .toggles = list(time_ar = 1),
+          init = "pathfinder")
+
+##--- * model comparison ----
+
 loos <- list("baseline" = baseline$stanfit$loo(),
              "drm_1" = drm_1$stanfit$loo(),
              "drm_2" = drm_2$stanfit$loo(),
@@ -218,13 +233,14 @@ loos <- list("baseline" = baseline$stanfit$loo(),
              "drm_4" = drm_4$stanfit$loo(),
              "drm_5" = drm_5$stanfit$loo(),
              "drm_6" = drm_6$stanfit$loo(),
-             "drm_7" = drm_7$stanfit$loo())
+             "drm_7" = drm_7$stanfit$loo(),
+             "sdm"   = sdm$stanfit$loo())
 
 loos_out <- loo::loo_compare(loos)
 
 ##--- * some quantities for model comparison ----
 
-times <- ls(pattern = "^(drm|baseline)") |>
+times <- ls(pattern = "^(drm|baseline|sdm)") |>
   sapply(\(x) get(x)$stanfit$time()$total)
 
 aux_qt <-
@@ -289,12 +305,18 @@ forecast_7 <- predict_drm(drm = drm_7,
                           seed = 125,
                           cores = 4)
 
+forecast_sdm <-
+  predict_sdm(sdm = sdm,
+              new_data = dat_test,
+              seed = 125,
+              cores = 4)
+
 ##--- * obtaining the summary for predictions ----
 
 all_forecasts <-
   ls(pattern = "^forecast_")
 all_drms <-
-  ls(pattern = "^(baseline|drm_)")
+  ls(pattern = "^(baseline|drm_|sdm)")
 
 forecasts_summary <-
   Map(f = \(x, nm) {
@@ -356,7 +378,8 @@ forecasts_summary |>
 ggplot(data = filter(forecasts_summary,
                      model %in% c("drm_3",
                                   "drm_4",
-                                  "drm_7")),
+                                  "drm_7",
+                                  "sdm")),
        aes(x = year,
            y = m)) +
   geom_ribbon(aes(ymin = l, ymax = u),
