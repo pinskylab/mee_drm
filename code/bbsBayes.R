@@ -102,7 +102,7 @@ my_grid <- my_grid |>
 
 my_grid <- my_grid |>
   mutate(across(count:non_zero_weight,
-                .fns = \(x) tidyr::replace_na(x, 0)))
+                .fns = \(x) tidyr:git:replace_na(x, 0)))
 
 my_grid <- left_join(my_map, my_grid,
                      by = c("id"))
@@ -120,6 +120,4 @@ my_grid |>
 
 my_grid <- my_grid |>
   filter(year > 1990)
-
-##--- drmr model ----
 
