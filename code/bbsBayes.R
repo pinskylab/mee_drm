@@ -9,7 +9,9 @@ library(drmr)
 
 fetch_bbs_data(level = "stop")
 
-s <- stratify(by = "latlong", species = "Baltimore oriole")
+species <- "Red-bellied woodpecker"
+
+s <- stratify(by = "latlong", species = species)
 
 p <- prepare_data(s, min_n_routes = 1)
 
@@ -19,15 +21,23 @@ p$raw_data |>
 
 my_dt <-
   p$raw_data |>
-  filter(country_num == "840") |>
-  filter(state == "MAINE")
+  filter(country_num == "840") 
 
 
 my_dt |>
   st_as_sf(coords = c("longitude", "latitude"),
            crs = st_crs("epsg:4326")) |>
   select(count, starts_with("n_")) |>
+  st_geometry() |>
   plot()
+
+c_hull_pts <-
+  my_dt |>
+  st_as_sf(coords = c("longitude", "latitude"),
+           crs = st_crs("epsg:4326")) |>
+  st_geometry() |>
+  st_union() |>
+  st_convex_hull()
 
 ##--- Maine Map -----
 
@@ -38,8 +48,9 @@ states <-
                  ) |>
   st_transform("epsg:4326")
 
-states <- states |>
-  filter(name == "Maine") |>
+states_2 <-
+  states[st_intersects(states, c_hull_pts,
+                       sparse = FALSE)[, 1], ] |>
   st_geometry() |>
   st_simplify(dTolerance = 2000) |>
   st_cast("POLYGON")
