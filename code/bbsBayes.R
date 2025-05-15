@@ -5,6 +5,10 @@ library(ggplot2)
 library(patchwork)
 library(drmr)
 
+##--- selecting species ----
+
+## sps <- readr::read_csv("data/birds/martins2024significant.csv")
+
 ##--- Mallard data in Maine ----
 
 fetch_bbs_data(level = "stop")
@@ -21,8 +25,7 @@ p$raw_data |>
 
 my_dt <-
   p$raw_data |>
-  filter(country_num == "840") 
-
+  filter(country_num == "840")
 
 my_dt |>
   st_as_sf(coords = c("longitude", "latitude"),
@@ -31,6 +34,7 @@ my_dt |>
   st_geometry() |>
   plot()
 
+## convex hull of the observations (to define study region)
 c_hull_pts <-
   my_dt |>
   st_as_sf(coords = c("longitude", "latitude"),
@@ -38,6 +42,9 @@ c_hull_pts <-
   st_geometry() |>
   st_union() |>
   st_convex_hull()
+
+## this region will be used to crop the environmental data
+st_write(c_hull_pts, dsn = "data/birds/shape/window.shp")
 
 ##--- Maine Map -----
 
@@ -48,33 +55,45 @@ states <-
                  ) |>
   st_transform("epsg:4326")
 
-states_2 <-
+states <-
   states[st_intersects(states, c_hull_pts,
                        sparse = FALSE)[, 1], ] |>
-  st_geometry() |>
+  ## st_geometry() |>
   st_simplify(dTolerance = 2000) |>
-  st_cast("POLYGON")
+  select(iso_a2, code_local, region, name)
 
-states <- states[4]
+states_merged <-
+  states |>
+  st_geometry() |>
+  st_cast("POLYGON") |>
+  st_union() |>
+  st_make_valid() |>
+  nngeo::st_remove_holes() |>
+  st_simplify(dTolerance = 5000)
 
-states <- st_make_valid(states) |>
-  nngeo::st_remove_holes()
+## climate: https://chelsa-climate.org/
 
 ##--- creating grid ----
 
-my_grid <- st_make_grid(x = states, n = c(10, 10))
+my_grid <- st_make_grid(x = states, n = c(30, 20))
 
 filter_grid <-
-  st_intersects(my_grid, st_intersection(st_buffer(states, 10)),
+  st_intersects(my_grid,
+                states_merged,
                 sparse = FALSE)
 
 my_grid <- my_grid[filter_grid[, 1], ]
+
+plot(states_merged)
+plot(my_grid, col = scales::alpha(2 , .2),
+     add = TRUE)
 
 ##--- counting events per cell ----
 
 my_grid <- my_grid |>
   st_as_sf() |>
-  mutate(id = row_number())
+  mutate(id = row_number(),
+         .before = x)
 
 st_geometry(my_grid) <- "geometry"
 
