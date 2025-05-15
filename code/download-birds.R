@@ -1,9 +1,8 @@
 library(bbsBayes2)
 library(sf)
 library(dplyr)
-library(ggplot2)
-library(patchwork)
-library(drmr)
+library(arrow)
+library(geoarrow)
 
 ##--- selecting species ----
 
@@ -118,21 +117,20 @@ my_grid <- my_grid |>
             n_routes = sum(n_routes, na.rm = TRUE),
             n_obs = sum(n_obs, na.rm = TRUE),
             n_obs_sites = sum(n_obs_sites, na.rm = TRUE),
+            n_obs_sites = sum(n_obs_sites, na.rm = TRUE),
+            mean_obs = mean(mean_obs, na.rm = TRUE),
             non_zero_weight = sum(non_zero_weight, na.rm = TRUE)) |>
   ungroup() |>
   mutate()
 
 my_grid <- year_id |>
-  filter(year != 2020) |>
+  filter(between(year, lb = 1980, ub = 2019)) |>
   left_join(my_grid, by = c("id", "year")) |>
   as_tibble()
 
 my_grid <- my_grid |>
-  st_as_sf()
-
-my_grid <- my_grid |>
   mutate(across(count:non_zero_weight,
-                .fns = \(x) tidyr:git:replace_na(x, 0)))
+                .fns = \(x) tidyr::replace_na(x, 0)))
 
 my_grid <- left_join(my_map, my_grid,
                      by = c("id"))
@@ -144,10 +142,8 @@ my_grid <- my_grid |>
   mutate(y = count / area)
 
 my_grid |>
-  filter(year == "2021") |>
+  filter(year == "2019") |>
   select(y) |>
   plot()
 
-my_grid <- my_grid |>
-  filter(year > 1990)
-
+write_dataset(my_grid, "data/birds/no_env.parquet")
