@@ -6,13 +6,11 @@ library(geoarrow)
 
 ##--- selecting species ----
 
-## sps <- readr::read_csv("data/birds/martins2024significant.csv")
-
-##--- Mallard data in Maine ----
+sps <- readr::read_csv("data/birds/martins2024significant.csv")
 
 fetch_bbs_data(level = "stop")
 
-species <- "Red-bellied woodpecker"
+species <- "Red-bellied Woodpecker"
 
 s <- stratify(by = "latlong", species = species)
 
@@ -74,18 +72,30 @@ states_merged <-
 
 ##--- creating grid ----
 
-my_grid <- st_make_grid(x = states, n = c(30, 20))
+my_grid <- st_make_grid(x = c_hull_pts, n = c(30, 20))
+
+filter_grid <-
+  st_intersects(my_grid,
+                c_hull_pts,
+                sparse = FALSE)
+
+my_grid <- my_grid[filter_grid[, 1], ]
+
+plot(states_merged)
+plot(my_grid, col = scales::alpha(2, .2),
+     add = TRUE)
 
 filter_grid <-
   st_intersects(my_grid,
                 states_merged,
                 sparse = FALSE)
 
-my_grid <- my_grid[filter_grid[, 1], ]
 
-plot(states_merged)
-plot(my_grid, col = scales::alpha(2 , .2),
+plot(my_grid[filter_grid[, 1], ],
+     col = scales::alpha(4, .2),
      add = TRUE)
+
+my_grid <- my_grid[filter_grid[, 1]]
 
 ##--- counting events per cell ----
 
@@ -124,7 +134,7 @@ my_grid <- my_grid |>
   mutate()
 
 my_grid <- year_id |>
-  filter(between(year, lb = 1980, ub = 2019)) |>
+  filter(between(year, left = 1980, right = 2019)) |>
   left_join(my_grid, by = c("id", "year")) |>
   as_tibble()
 

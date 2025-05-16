@@ -31,19 +31,28 @@ avg_maps <-
       mutate(year = year)
   })
 
-avg_maps <- bind_rows(avg_maps)
+avg_maps <- lapply(avg_maps, \(x) {
+  names(x)[2] <- "tavg"
+  x
+})
 
-avg_maps <-
-  avg_maps |>
-  tidyr::pivot_longer(c(2, 4:NCOL(avg_maps)),
-                      values_to = "tavg") |>
-  select(- name) |>
-  filter(!is.na(tavg))
+avg_maps <- bind_rows(avg_maps)
 
 my_dt <- left_join(my_dt, avg_maps,
                    by = c("id" = "ID",
                           "year"))
 
+## if the data is in tens of kelvin:
+## my_dt$tavg / 10 - 273.15
+
 my_dt <-
   my_dt |>
   filter(!is.na(tavg))
+
+my_dt <-
+  my_dt |>
+  mutate(tavg = tavg / 10 - 273.15) |>
+  mutate(fahrenreit = tavg * 1.8 + 32,
+         .before = geometry)
+
+write_dataset(my_dt, "data/birds/processed.parquet")

@@ -4,11 +4,7 @@
 # !stan_models/utils
 # stan_models/*
 
-data/satellite/summer/*.h5
-data/satellite/winter/*.h5
-
-data/satellite/nlcd/*.tiff
-data/satellite/nlcd/*.zip
+data/chelsa/*.tif
   
 overleaf
     
