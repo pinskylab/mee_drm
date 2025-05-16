@@ -72,7 +72,7 @@ states_merged <-
 
 ##--- creating grid ----
 
-my_grid <- st_make_grid(x = c_hull_pts, n = c(30, 20))
+my_grid <- st_make_grid(x = c_hull_pts, n = c(10, 10))
 
 filter_grid <-
   st_intersects(my_grid,
@@ -96,6 +96,9 @@ plot(my_grid[filter_grid[, 1], ],
      add = TRUE)
 
 my_grid <- my_grid[filter_grid[, 1]]
+
+plot(my_grid, col = scales::alpha(4, .2),
+     add = TRUE)
 
 ##--- counting events per cell ----
 

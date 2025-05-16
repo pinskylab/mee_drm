@@ -3,6 +3,8 @@ library(sf)
 library(terra)
 library(ggplot2)
 
+## https://chelsa-climate.org/
+
 temps <- rast("data/chelsa/tas_2019_avg.tif")
 
 plot(temps)

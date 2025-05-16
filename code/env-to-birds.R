@@ -55,4 +55,8 @@ my_dt <-
   mutate(fahrenreit = tavg * 1.8 + 32,
          .before = geometry)
 
+my_dt <- my_dt |>
+  mutate(id = as.integer(factor(id))) |>
+  arrange(id, year)
+
 write_dataset(my_dt, "data/birds/processed.parquet")
