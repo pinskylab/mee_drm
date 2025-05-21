@@ -221,7 +221,7 @@ sdm <-
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
           formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
-          .toggles = list(time_ar = 1),
+          .toggles = list(time_ar = 0),
           init = "pathfinder")
 
 ##--- * model comparison ----
