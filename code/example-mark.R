@@ -351,7 +351,7 @@ bind_rows(sdm_fitted, sdm_forecast) |>
 out_forecast |>
   mutate(model = "DRM", .before = "year") |>
   bind_rows(mutate(sdm_forecast, model = "SDM", .before = "year")) |>
-  filter(year != first_year_forecast) |>
+  ## filter(year != first_year_forecast) |>
   mutate(bias = dens - m) |>
   mutate(rmse = bias * bias) |>
   mutate(is = int_score(dens, l = l, u = u, alpha = .2)) |>
@@ -431,6 +431,8 @@ ggplot(data = zt_summary,
   geom_ribbon(aes(ymin = l, ymax = u)) +
   geom_line(color = "white", lwd = 2) +
   geom_vline(xintercept = 31, color = 2, lty = 2,
+             lwd = 2) +
+  geom_hline(yintercept = 0, color = 2, lty = 3,
              lwd = 2) +
   theme_bw()
 
