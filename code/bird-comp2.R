@@ -5,83 +5,105 @@ library(sf)
 library(drmr)
 library(patchwork)
 library(cmdstanr)
-library(mgcv)
+library(arrow)
+library(geoarrow)
 
 ## loading data
-data(sum_fl)
+my_dt <- open_dataset("data/birds/processed.parquet") |>
+  st_as_sf()
 
-## loading map
-map_name <- system.file("maps/sum_fl.shp", package = "drmr")
+my_dt <- my_dt |>
+  mutate(id = as.integer(factor(id)),
+         lon = st_coordinates(st_centroid(geometry))[, 1],
+         lat = st_coordinates(st_centroid(geometry))[, 2]) |>
+  arrange(id, year)
 
-polygons <- st_read(map_name)
+polygons <- my_dt |>
+  filter(year == min(year)) |>
+  st_geometry()
 
 polygons |>
   st_area() |>
   units::set_units("km^2") |>
   summary()
 
+my_dt <- st_drop_geometry(my_dt)
+
 ##--- splitting data for validation ----
 
 ## reserving 5 years for forecast assessment
-first_year_forecast <- max(sum_fl$year) - 4
+first_year_forecast <- max(my_dt$year) - 4
 
 ## "year to id"
 first_id_forecast <-
-  first_year_forecast - min(sum_fl$year) + 1
+  first_year_forecast - min(my_dt$year) + 1
 
-years_all <- order(unique(sum_fl$year))
+years_all <- order(unique(my_dt$year))
 years_train <- years_all[years_all < first_id_forecast]
 years_test <- years_all[years_all >= first_id_forecast]
 
-dat_test <- sum_fl |>
+dat_test <- my_dt |>
   filter(year >= first_year_forecast)
 
-dat_train <- sum_fl |>
+dat_train <- my_dt |>
   filter(year < first_year_forecast)
 
 ##--- centering covariates (for improved mcmc efficiency) ---
 
-avgs <- c("stemp" = mean(dat_train$stemp),
-          "btemp" = mean(dat_train$btemp),
-          "depth" = mean(dat_train$depth),
-          "n_hauls" = mean(dat_train$n_hauls),
-          "lat" = mean(dat_train$lat),
-          "lon" = mean(dat_train$lon))
+avgs <- c("tavg" = mean(dat_train$tavg),
+          "lon" = mean(dat_train$lon),
+          "lat" = mean(dat_train$lat))
 
 min_year <- dat_train$year |>
   min()
 
 ## centering covariates
 dat_train <- dat_train |>
-  mutate(c_stemp = stemp - avgs["stemp"],
-         c_btemp = btemp - avgs["btemp"],
-         c_hauls = n_hauls - avgs["n_hauls"],
-         ## depth = depth - avgs["depth"],
-         c_lat   = lat - avgs["lat"],
-         c_lon   = lon - avgs["lon"],
-         time  = year - min_year)
+  mutate(c_tavg = tavg - avgs["tavg"],
+         c_lat  = lat - avgs["lat"],
+         c_lon  = lon - avgs["lon"],
+         time   = year - min_year)
 
 dat_test <- dat_test |>
-  mutate(c_stemp = stemp - avgs["stemp"],
-         c_btemp = btemp - avgs["btemp"],
-         c_hauls = n_hauls - avgs["n_hauls"],
-         ## depth = depth - avgs["depth"],
-         c_lat   = lat - avgs["lat"],
-         c_lon   = lon - avgs["lon"],
-         time  = year - min_year)
+  mutate(c_tavg = tavg - avgs["tavg"],
+         c_lat  = lat - avgs["lat"],
+         c_lon  = lon - avgs["lon"],
+         time   = year - min_year)
 
 ##--- turning response into density: 1k individuals per km2 ----
 
 dat_train <- dat_train |>
-  mutate(dens = 1000 * y / area_km2,
+  mutate(dens = 1000 * y,
          .before = y)
 
 dat_test <- dat_test |>
-  mutate(dens = 1000 * y / area_km2,
+  mutate(dens = 1000 * y,
          .before = y)
 
 chains <- 4
 cores <- 4
+
+##--- fitting SDMs ----
+
+## fix pp_sim for SDM
+
+my_sdm <-
+  fit_sdm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "id",
+          seed = 202505,
+          family = "lognormal",
+          formula_zero = ~ 1 + n_routes +
+            c_tavg + c_lon + c_lat,
+          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg),
+          .toggles = list(time_ar = 0),
+          .priors = list(pr_phi_a = .1, pr_phi_b = .1),
+          init = "pathfinder")
+
+
+sdm$stanfit$summary(variables = c("beta_t", "beta_r",
+                                  "tau", "alpha", "phi"))
 
 ##--- fitting DRMs ----
 
@@ -89,14 +111,16 @@ my_drm <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
-          site_col = "patch",
+          site_col = "id",
           seed = 202505,
-          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
-          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          family = "loglogistic",
+          formula_zero = ~ 1 + n_routes +
+            c_tavg + c_lon + c_lat,
+          formula_rec = ~ 1 + c_tavg + I(c_tavg * c_tavg),
           formula_surv = ~ 1,
           .toggles = list(est_surv = 1,
-                          time_ar = 1),
-          init = "pathfinder")
+                          time_ar = 1))
+
 
 ##--- forecasting ----
 
@@ -145,14 +169,14 @@ forecasts_summary <-
 
 out_forecast <-
   dat_test |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   mutate(pair = row_number(), .before = 1) |>
   left_join(forecasts_summary, by = "pair") |>
   select(- pair)
 
 out_fitted <-
   dat_train |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   bind_cols(select(fitted_summary, -pair))
 
 ggplot(data = out_fitted,
@@ -163,7 +187,7 @@ ggplot(data = out_fitted,
   geom_line(aes(y = m)) +
   geom_point(aes(y = dens),
              color = 4) +
-  facet_wrap(~ rev(patch),
+  facet_wrap(~ id,
              scales = "free_y") +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3)) +
@@ -177,19 +201,19 @@ ggplot(data = out_forecast,
   geom_line(aes(y = m)) +
   geom_point(aes(y = dens),
              color = 4) +
-  facet_wrap(~ rev(patch),
+  facet_wrap(~ id,
              scales = "free_y") +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3)) +
   theme_bw()
 
-count(out_fitted, patch)
-count(out_forecast, patch)
-
-count(out_fitted, year)
-count(out_forecast, year)
+set.seed(125)
+ids <- sample(seq_len(max(out_fitted$id)),
+              size = 5)
 
 bind_rows(out_fitted, out_forecast) |>
+  filter(id %in% ids) |>
+  filter(year != first_year_forecast) |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +
@@ -200,24 +224,11 @@ bind_rows(out_fitted, out_forecast) |>
   geom_line(aes(x = year, y = m)) +
   geom_point(aes(x = year, y = dens),
              color = 4) +
-  facet_wrap(~ patch) +
+  facet_wrap(~ id) +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3),
                      trans = "log1p") +
   theme_bw()
-
-##--- LN SDM ----
-
-my_sdm <-
-  fit_sdm(.data = dat_train,
-          y_col = "dens", ## response variable: density
-          time_col = "year", ## vector of time points
-          site_col = "patch",
-          family = "lognormal",
-          seed = 202505,
-          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
-          formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
-          init = "pathfinder")
 
 ##--- forcasts SDM ----
 
@@ -265,14 +276,14 @@ for_sdm <-
 
 sdm_forecast <-
   dat_test |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   mutate(pair = row_number(), .before = 1) |>
   left_join(for_sdm, by = "pair") |>
   select(- pair)
 
 sdm_fitted <-
   dat_train |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   bind_cols(select(fitted_sdm, -pair))
 
 ggplot(data = sdm_fitted,
@@ -283,7 +294,7 @@ ggplot(data = sdm_fitted,
   geom_line(aes(y = m)) +
   geom_point(aes(y = dens),
              color = 4) +
-  facet_wrap(~ rev(patch),
+  facet_wrap(~ id,
              scales = "free_y") +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3)) +
@@ -297,7 +308,7 @@ ggplot(data = sdm_forecast,
   geom_line(aes(y = m)) +
   geom_point(aes(y = dens),
              color = 4) +
-  facet_wrap(~ rev(patch),
+  facet_wrap(~ id,
              scales = "free_y") +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3)) +
@@ -315,7 +326,7 @@ bind_rows(sdm_fitted, sdm_forecast) |>
   geom_line(aes(x = year, y = m)) +
   geom_point(aes(x = year, y = dens),
              color = 4) +
-  facet_wrap(~ patch) +
+  facet_wrap(~ id) +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3),
                      trans = "log1p") +
@@ -329,6 +340,8 @@ bind_rows(sdm_fitted, sdm_forecast) |>
       bind_rows(out_fitted, out_forecast) |>
       mutate(model = "DRM")
   ) |>
+  filter(id %in% ids) |>
+  filter(year != first_year_forecast) |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +
@@ -339,7 +352,7 @@ bind_rows(sdm_fitted, sdm_forecast) |>
               alpha = .4) +
   geom_line(aes(x = year, y = m, color = model)) +
   geom_point(aes(x = year, y = dens)) +
-  facet_wrap(model ~ patch) +
+  facet_wrap(model ~ id) +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3),
                      trans = "log1p") +
@@ -372,7 +385,7 @@ out_forecast |>
   ##                digits = 2) |>
   ## print(include.rownames = FALSE)
 
-flounder_out <-
+wood_out <-
   bind_rows(sdm_fitted, sdm_forecast) |>
   mutate(model = "SDM") |>
   bind_rows(
@@ -380,5 +393,29 @@ flounder_out <-
       mutate(model = "DRM")
   )
 
-arrow::write_dataset(flounder_out,
-                     path = "~/git-projects/lcgodoy.github.io/slides/2025-frcheck/data/sumf.parquet")
+
+wood_out <- open_dataset("data/birds/processed.parquet") |>
+  st_as_sf() |>
+  mutate(id = as.integer(factor(id)),
+         lon = st_coordinates(st_centroid(geometry))[, 1],
+         lat = st_coordinates(st_centroid(geometry))[, 2]) |>
+  arrange(id, year) |>
+  filter(year == min(year)) |>
+  select(id) |>
+  left_join(wood_out, by = "id")
+
+wood_out
+
+write_dataset(wood_out,
+              path = "~/git-projects/lcgodoy.github.io/slides/2025-frcheck/data/wood.parquet")
+
+wood_out |>
+  filter(year %in% c((first_year_forecast + 1):max(year))) |>
+  tidyr::pivot_longer(cols = c("dens", "m")) |>
+  mutate(model = if_else(name == "dens", "Observed", model)) |>
+  ggplot(data = _) +
+  geom_sf(aes(fill = value)) +
+  scale_fill_viridis_c(option = "H", trans = "log1p") +
+  facet_grid(model ~ year) +
+  theme_bw() +
+  theme()
