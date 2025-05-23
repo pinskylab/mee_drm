@@ -90,6 +90,7 @@ my_drm <-
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
           site_col = "patch",
+          n_ages = 12,
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
           formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
@@ -382,3 +383,119 @@ flounder_out <-
 
 arrow::write_dataset(flounder_out,
                      path = "~/git-projects/lcgodoy.github.io/slides/2025-frcheck/data/sumf.parquet")
+
+##--- taking a look at the Z ----
+
+zt_summary <-
+  my_drm$stanfit$draws(variables = "z_t",
+                       format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("z_t"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+ztp_summary <-
+  forecast_drm$draws(variables = "z_tp",
+                     format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("z_tp"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+ztp_summary <- mutate(ztp_summary, pair = pair + max(zt_summary$pair))
+
+zt_summary <- zt_summary |>
+  bind_rows(ztp_summary)
+
+ggplot(data = zt_summary,
+       aes(x = pair,
+           y = m)) +
+  geom_ribbon(aes(ymin = l, ymax = u)) +
+  geom_line(color = "white", lwd = 2) +
+  geom_vline(xintercept = 31, color = 2, lty = 2,
+             lwd = 2) +
+  theme_bw()
+
+##--- taking a look at lambda ----
+
+lbd_drm <- drmr:::lambda_drm(my_drm, cores = 1)
+
+## age, time, patch
+
+lbd_summary <-
+  lbd_drm$draws(variables = "lambda",
+                format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("lambda"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(ages = gsub("[a-z]", "", pair)) |>
+  mutate(patch = sapply(strsplit(ages, split = ","),
+                        \(x) gsub("\\D", "", x[3]))) |>
+  mutate(time  = sapply(strsplit(ages, split = ","),
+                        \(x) gsub("\\D", "", x[2]))) |>
+  mutate(age   = sapply(strsplit(ages, split = ","),
+                        \(x) gsub("\\D", "", x[1]))) |>
+  mutate(across(patch:age, as.integer)) |>
+  select(-ages)
+
+lbd_fct <-
+  forecast_drm$draws(variables = "lambda_proj",
+                     format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("lambda_proj"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(ages = gsub("[a-z]", "", pair)) |>
+  mutate(patch = sapply(strsplit(ages, split = ","),
+                        \(x) gsub("\\D", "", x[3]))) |>
+  mutate(time  = sapply(strsplit(ages, split = ","),
+                        \(x) gsub("\\D", "", x[2]))) |>
+  mutate(age   = sapply(strsplit(ages, split = ","),
+                        \(x) gsub("\\D", "", x[1]))) |>
+  mutate(across(patch:age, as.integer)) |>
+  select(-ages)
+
+lbd_fct <- lbd_fct |>
+  mutate(time = time + max(lbd_summary$time))
+
+lbd_all <- bind_rows(lbd_summary, lbd_fct)
+
+lbd_all |>
+  filter(time %in% c(29:max(time))) |>
+  ggplot(data = _,
+         aes(x = age)) +
+  geom_segment(aes(yend = m, y = 0)) +
+  geom_point(aes(y = m)) +
+  facet_grid(patch ~ time) +
+  theme_bw()
