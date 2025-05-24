@@ -1,3 +1,88 @@
+library(dplyr)
+library(ggplot2)
+library(bayesplot)
+library(sf)
+library(drmr)
+library(patchwork)
+library(cmdstanr)
+library(arrow)
+library(geoarrow)
+
+## loading data
+my_dt <- open_dataset("data/birds/processed.parquet") |>
+  st_as_sf()
+
+my_dt <- my_dt |>
+  mutate(id = as.integer(factor(id)),
+         lon = st_coordinates(st_centroid(geometry))[, 1],
+         lat = st_coordinates(st_centroid(geometry))[, 2]) |>
+  arrange(id, year)
+
+polygons <- my_dt |>
+  filter(year == min(year)) |>
+  st_geometry()
+
+polygons |>
+  st_area() |>
+  units::set_units("km^2") |>
+  summary()
+
+my_dt <- st_drop_geometry(my_dt)
+
+##--- splitting data for validation ----
+
+## reserving 5 years for forecast assessment
+first_year_forecast <- max(my_dt$year) - 4
+
+## "year to id"
+first_id_forecast <-
+  first_year_forecast - min(my_dt$year) + 1
+
+years_all <- order(unique(my_dt$year))
+years_train <- years_all[years_all < first_id_forecast]
+years_test <- years_all[years_all >= first_id_forecast]
+
+dat_test <- my_dt |>
+  filter(year >= first_year_forecast)
+
+dat_train <- my_dt |>
+  filter(year < first_year_forecast)
+
+##--- centering covariates (for improved mcmc efficiency) ---
+
+avgs <- c("tavg" = mean(dat_train$tavg),
+          "lon" = mean(dat_train$lon),
+          "lat" = mean(dat_train$lat))
+
+min_year <- dat_train$year |>
+  min()
+
+## centering covariates
+dat_train <- dat_train |>
+  mutate(c_tavg = tavg - avgs["tavg"],
+         c_lat  = lat - avgs["lat"],
+         c_lon  = lon - avgs["lon"],
+         time   = year - min_year)
+
+dat_test <- dat_test |>
+  mutate(c_tavg = tavg - avgs["tavg"],
+         c_lat  = lat - avgs["lat"],
+         c_lon  = lon - avgs["lon"],
+         time   = year - min_year)
+
+##--- turning response into density: 1k individuals per km2 ----
+
+dat_train <- dat_train |>
+  mutate(dens = 1000 * y,
+         .before = y)
+
+dat_test <- dat_test |>
+  mutate(dens = 1000 * y,
+         .before = y)
+
+chains <- 4
+cores <- 4
+
 ##--- fitting DRMs ----
 
 adj_mat <- gen_adj(st_geometry(polygons))
@@ -45,7 +130,6 @@ drm_surv <-
                           est_surv = 1,
                           movement = 1),
           init = "pathfinder")
-
 
 ##--- * SDM ----
 
@@ -139,14 +223,14 @@ forecast_rec <-
 
 forecast_rec <-
   dat_test |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   mutate(pair = row_number(), .before = 1) |>
   left_join(forecast_rec, by = "pair") |>
   select(- pair)
 
 fitted_rec <-
   dat_train |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   bind_cols(select(fitted_rec, -pair))
 
 fitted_surv <-
@@ -185,14 +269,14 @@ forecasts_surv <-
 
 forecast_surv <-
   dat_test |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   mutate(pair = row_number(), .before = 1) |>
   left_join(forecasts_surv, by = "pair") |>
   select(- pair)
 
 fitted_surv <-
   dat_train |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   bind_cols(select(fitted_surv, -pair))
 
 fitted_sdm <-
@@ -231,17 +315,21 @@ for_sdm <-
 
 for_sdm <-
   dat_test |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   mutate(pair = row_number(), .before = 1) |>
   left_join(for_sdm, by = "pair") |>
   select(- pair)
 
 fitted_sdm <-
   dat_train |>
-  select(year, patch, lat_floor, dens) |>
+  select(year, id, lat, lon, dens) |>
   bind_cols(select(fitted_sdm, -pair))
 
-##--- Figure 1 ----
+##--- Figure ? ----
+
+set.seed(123)
+ids <- sample(seq_len(max(dat_train$id)),
+              size = 5)
 
 bind_rows(fitted_sdm, for_sdm) |>
   mutate(model = "SDM") |>
@@ -251,7 +339,8 @@ bind_rows(fitted_sdm, for_sdm) |>
       bind_rows(fitted_surv, forecast_surv) |>
       mutate(model = "DRM (surv)")      
   ) |>
-  filter(year > 1985) |>
+  filter(year > 1982) |>
+  filter(id %in% ids) |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +
@@ -262,11 +351,18 @@ bind_rows(fitted_sdm, for_sdm) |>
               alpha = .4) +
   geom_line(aes(x = year, y = m, color = model)) +
   geom_point(aes(x = year, y = dens)) +
-  facet_grid(patch ~ model) +
+  facet_grid(id ~ model) +
+  guides(color = "none",
+         fill = "none") +
+  labs(x = NULL) +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3),
                      trans = "log1p") +
   theme_bw()
+
+ggsave(filename = "overleaf/img/forecasts_birds.pdf",
+       width = 6,
+       height = 8)
 
 aux_qt <-
   mutate(aux_qt,
@@ -274,7 +370,7 @@ aux_qt <-
                            Model == "drec" ~ "DRM (rec)",
                            TRUE            ~ "DRM (surv)"))
 
-sdm_forecast |>
+for_sdm |>
   mutate(model = "SDM") |>
   bind_rows(
       forecast_rec |>
@@ -303,6 +399,57 @@ sdm_forecast |>
                  digits = 2) |>
   print(include.rownames = FALSE)
 
+##--- saving stuff ----
+
+wood_out <-
+  bind_rows(fitted_sdm, for_sdm) |>
+  mutate(model = "SDM") |>
+  bind_rows(
+      bind_rows(fitted_rec, forecast_rec) |>
+      mutate(model = "DRM (rec)"),
+      bind_rows(fitted_surv, forecast_surv) |>
+      mutate(model = "DRM (surv)")      
+  )
+
+wood_out <- open_dataset("data/birds/processed.parquet") |>
+  st_as_sf() |>
+  mutate(id = as.integer(factor(id)),
+         lon = st_coordinates(st_centroid(geometry))[, 1],
+         lat = st_coordinates(st_centroid(geometry))[, 2]) |>
+  arrange(id, year) |>
+  filter(year == min(year)) |>
+  select(id) |>
+  left_join(wood_out, by = "id")
+
+wood_out
+
+write_dataset(wood_out,
+              path = "~/git-projects/lcgodoy.github.io/slides/2025-frcheck/data/wood.parquet")
+
+wood_out |>
+  filter(year %in% c((first_year_forecast + 1):max(year))) |>
+  tidyr::pivot_longer(cols = c("dens", "m")) |>
+  mutate(model = if_else(name == "dens", "Observed", model)) |>
+  ggplot(data = _) +
+  geom_sf(aes(fill = value)) +
+  scale_fill_viridis_c(option = "H", trans = "log1p") +
+  facet_grid(model ~ year) +
+  theme_bw()
+
+wood_out |>
+  filter(year %in% c(1985, 1995, 2005, 2015)) |>
+  tidyr::pivot_longer(cols = c("dens", "m")) |>
+  mutate(model = if_else(name == "dens", "Observed", model)) |>
+  mutate(model = factor(model,
+                        levels = c("Observed", "DRM (rec)",
+                                   "DRM (surv)", "SDM"))) |>
+  ggplot(data = _) +
+  geom_sf(aes(fill = value)) +
+  scale_fill_viridis_c(option = "H", trans = "log1p") +
+  facet_grid(model ~ year) +
+  theme_bw() +
+  theme(axis.text.x = element_blank(),
+        axis.ticks.x = element_blank())
 
 ##--- * MCMC diagnostics ----
 
@@ -336,19 +483,19 @@ mcmc_dens_overlay(drm_surv$stanfit$draws(variables = c("beta_t")))
 
 ## recruitment
 
-newdata_rec <- data.frame(c_stemp =
-                            seq(from = quantile(dat_train$c_stemp, .05),
-                                to = quantile(dat_train$c_stemp, .95),
+newdata_rec <- data.frame(c_tavg =
+                            seq(from = quantile(dat_train$c_tavg, .05),
+                                to = quantile(dat_train$c_tavg, .95),
                                 length.out = 200))
 
 rec_samples_3 <- marg_rec(drm_rec, newdata_rec)
 
 rec_samples_3 <- rec_samples_3 |>
-  mutate(stemp = c_stemp + avgs["stemp"])
+  mutate(tavg = c_tavg + avgs["tavg"])
 
 rec_summary <-
   rec_samples_3 |>
-  group_by(stemp) |>
+  group_by(tavg) |>
   summarise(ll = quantile(recruitment, probs = .05),
             l = quantile(recruitment, probs = .1),
             m = median(recruitment),
@@ -359,7 +506,7 @@ rec_summary <-
 
 rec_fig <-
   ggplot(data = rec_summary,
-         aes(x = stemp,
+         aes(x = tavg,
              y = m)) +
   geom_ribbon(aes(ymin = l, ymax = u),
               fill = "gray50",
@@ -370,33 +517,33 @@ rec_fig <-
   guides(fill = "none") +
   labs(color = "Model",
        fill = "Model",
-       x = "SST (in Celsius)",
+       x = "Temperature (in Celsius)",
        y = "Est. recruitment (per km2)") +
   theme(legend.position = "inside",
         legend.position.inside = c(0.175, 0.75))
 
 gratio <- 0.5 * (1 + sqrt(5))
 
-ggsave(filename = "overleaf/img/recruitment.pdf",
+ggsave(filename = "overleaf/img/recruitment_bird.pdf",
        plot = rec_fig,
        width = 6,
        height = 6 / gratio)
 
 ##--- * survival ----
 
-newdata_surv <- data.frame(c_btemp =
-                             seq(from = quantile(dat_train$c_btemp, .05),
-                                 to = quantile(dat_train$c_btemp, .95),
+newdata_surv <- data.frame(c_tavg =
+                             seq(from = quantile(dat_train$c_tavg, .05),
+                                 to = quantile(dat_train$c_tavg, .95),
                                  length.out = 200))
 
 surv_samples <- marg_surv(drm_surv, newdata_surv)
 
 surv_samples <- surv_samples |>
-  mutate(btemp = c_btemp + avgs["btemp"])
+  mutate(tavg = c_tavg + avgs["tavg"])
 
 surv_summary <-
   surv_samples |>
-  group_by(btemp) |>
+  group_by(tavg) |>
   summarise(ll = quantile(survival, probs = .05),
             l = quantile(survival, probs = .1),
             m = median(survival),
@@ -406,7 +553,7 @@ surv_summary <-
 
 surv_fig <-
   ggplot(data = surv_summary,
-         aes(x = btemp,
+         aes(x = tavg,
              y = m)) +
   geom_ribbon(aes(ymin = l, ymax = u),
               fill = "gray50",
@@ -417,7 +564,7 @@ surv_fig <-
   labs(x = "SBT (in Celsius)",
        y = "Est. survival")
 
-ggsave(filename = "overleaf/img/surv.pdf",
+ggsave(filename = "overleaf/img/surv_bird.pdf",
        plot = surv_fig,
        width = 6,
        height = 6 / gratio)
@@ -429,7 +576,15 @@ betas_s_7 <-
                          format = "matrix")
 
 max_quad_x(betas_s_7[, 2], betas_s_7[, 3],
-           offset = avgs["stemp"]) |>
+           offset = avgs["tavg"]) |>
+  apply(2, quantile, probs = c(.1, .5, .9))
+
+betas_s_7 <-
+  drm_rec$stanfit$draws(variables = "beta_r",
+                        format = "matrix")
+
+max_quad_x(betas_s_7[, 2], betas_s_7[, 3],
+           offset = avgs["tavg"]) |>
   apply(2, quantile, probs = c(.1, .5, .9))
 
 ##--- Panel for recruitment and survival ----
@@ -438,6 +593,6 @@ rec_fig + surv_fig +
   plot_annotation(tag_levels = "A") &
   theme(plot.tag = element_text(size = 10))
 
-ggsave(filename = "overleaf/img/rec_surv.pdf",
+ggsave(filename = "overleaf/img/rec_surv_bird.pdf",
        width = 7,
        height = .75 * 7 / gratio)
