@@ -91,7 +91,6 @@ adj_mat <- gen_adj(st_buffer(st_geometry(polygons),
 adj_mat <-
   t(apply(adj_mat, 1, \(x) x / (sum(x))))
 
-
 ## instantaneous fishing mortality rates
 fmat <-
   system.file("fmat.rds", package = "drmr") |>
@@ -120,6 +119,56 @@ drm_rec <-
                           est_surv = 1,
                           movement = 1),
           init = "pathfinder")
+
+## estimates
+
+drm_rec$stanfit$summary(variables = c("phi", "beta_r"))
+
+##--- Viz relationships ----
+
+## * make this into a function!
+## ** that is far from easy!
+
+## recruitment
+
+newdata_rec <- data.frame(c_stemp =
+                            seq(from = quantile(dat_train$c_stemp, .05),
+                                to = quantile(dat_train$c_stemp, .95),
+                                length.out = 200))
+
+rec_samples_3 <- marg_rec(drm_rec, newdata_rec)
+
+rec_samples_3 <- rec_samples_3 |>
+  mutate(stemp = c_stemp + avgs["stemp"])
+
+rec_summary <-
+  rec_samples_3 |>
+  group_by(stemp) |>
+  summarise(ll = quantile(recruitment, probs = .05),
+            l = quantile(recruitment, probs = .1),
+            m = median(recruitment),
+            u = quantile(recruitment, probs = .9),
+            uu = quantile(recruitment, probs = .95)) |>
+  ungroup() |>
+  mutate(model = "drm_rec")
+
+rec_fig <-
+  ggplot(data = rec_summary,
+         aes(x = stemp,
+             y = m)) +
+  geom_ribbon(aes(ymin = l, ymax = u),
+              fill = "gray50",
+              color = "transparent",
+              linewidth = 1.2) +
+  geom_line(color = "white", linewidth = 1.2) +
+  theme_bw() +
+  guides(fill = "none") +
+  labs(color = "Model",
+       fill = "Model",
+       x = "SST (in Celsius)",
+       y = "Est. recruitment (per km2)") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(0.175, 0.75))
 
 drm_surv <-
   fit_drm(.data = dat_train,
