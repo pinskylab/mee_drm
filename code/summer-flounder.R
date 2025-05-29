@@ -104,7 +104,7 @@ drm_rec <-
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
           site_col = "patch",
-          family = "gamma",
+          family = "lognormal",
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
           formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
@@ -118,7 +118,7 @@ drm_rec <-
           .toggles = list(time_ar = 1,
                           est_surv = 1,
                           movement = 1),
-          init = "pathfinder")
+          .priors = list(pr_phi_a = 5))
 
 ## estimates
 
