@@ -7,14 +7,10 @@
 data/chelsa/*.tif
   
 overleaf
-    
-stan_models/*.rds
+
+data/birds/models/*.rds
 
 data/cmdstan_outfiles/*
-  
-data/aux-*
-
-data/hdist.rds
     
 *~
 *.RData
