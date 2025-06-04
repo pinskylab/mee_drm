@@ -6,6 +6,8 @@ library(drmr)
 library(patchwork)
 library(cmdstanr)
 
+bayesplot::color_scheme_set(scheme = "mix-pink-teal")
+
 ## loading data
 data(sum_fl)
 
@@ -22,7 +24,7 @@ polygons |>
 ##--- splitting data for validation ----
 
 ## reserving 5 years for forecast assessment
-first_year_forecast <- max(sum_fl$year) - 4
+first_year_forecast <- max(sum_fl$year) - 14
 
 ## "year to id"
 first_id_forecast <-
@@ -139,6 +141,18 @@ ggplot() +
 
 ##--- DRM recruitment ----
 
+init_ldens <-
+  dat_train |>
+  filter(year < 1987) |>
+  summarise(dens = sum(area_km2 * dens) / sum(area_km2)) |>
+  pull(dens)
+
+init_ldens <-
+  init_ldens *
+  seq(.9, .1, len = NROW(f_train)) / sum(seq(.9, .1, len = NROW(f_train)))
+
+init_ldens <- log(init_ldens[-1])
+
 drm_rec <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
@@ -151,13 +165,15 @@ drm_rec <-
           formula_surv = ~ 1,
           f_mort = f_train,
           n_ages = NROW(f_train),
+          init_data = init_ldens,
           adj_mat = adj_mat, ## A matrix for movement routine
           ages_movement = c(0, 0,
                             rep(1, 12),
                             0, 0), ## ages allowed to move
-          .toggles = list(time_ar = 1,
+          .toggles = list(ar_re = "rec",
                           movement = 1,
-                          est_surv = 1),
+                          est_surv = 1,
+                          est_init = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
@@ -175,7 +191,9 @@ drm_rec$stanfit$draws(variables = c("phi")) |>
 
 drm_rec$stanfit$draws(variables = c("alpha")) |>
   mcmc_dens_overlay() +
-  stat_function(fun = \(x) dbeta(x, shape1 = 4.2, shape2 = 5.8),
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_rec$data$pr_alpha_a,
+                                 shape2 = drm_rec$data$pr_alpha_b),
                 xlim = c(0, 1),
                 n = 501,
                 inherit.aes = FALSE,
@@ -184,8 +202,21 @@ drm_rec$stanfit$draws(variables = c("alpha")) |>
 
 drm_rec$stanfit$draws(variables = c("zeta")) |>
   mcmc_dens_overlay() +
-  stat_function(fun = \(x) dbeta(x, shape1 = 7, shape2 = 3),
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_rec$data$pr_zeta_a,
+                                 shape2 = drm_rec$data$pr_zeta_b),
                 xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_rec$stanfit$draws(variables = c("sigma_t")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dlnorm(x,
+                                  meanlog = drm_rec$data$pr_lsigma_t_mu,
+                                  sdlog = drm_rec$data$pr_lsigma_t_sd),
+                xlim = c(0, .5),
                 n = 501,
                 inherit.aes = FALSE,
                 color = 2,
@@ -260,7 +291,8 @@ max_quad_x(betas_rec[, 2], betas_rec[, 3],
 
 ## all rhat's look good (no larger than 1.01)
 drm_rec$stanfit$summary(variables = c("beta_r", "beta_t",
-                                      "alpha", "tau",
+                                      "alpha", "sigma_t",
+                                      ## "sigma_s",
                                       "zeta", "phi"))
 
 ## the different chains are in agreement and converging.
@@ -270,15 +302,17 @@ drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
 drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
   mcmc_dens_overlay()
 
-drm_rec$stanfit$draws(variables = c("alpha", "tau",
+drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    ## "sigma_s",
                                     "zeta", "phi")) |>
   mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
 
-drm_rec$stanfit$draws(variables = c("alpha", "tau",
+drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    ## "sigma_s",
                                     "zeta", "phi")) |>
   mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
-##--- * DRM Survival ----
+##--- DRM Survival ----
 
 drm_surv <-
   fit_drm(.data = dat_train,
@@ -292,22 +326,25 @@ drm_surv <-
           formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
           f_mort = f_train,
           n_ages = NROW(f_train),
+          init_data = init_ldens,
           adj_mat = adj_mat, ## A matrix for movement routine
           ages_movement = c(0, 0,
                             rep(1, 12),
                             0, 0), ## ages allowed to move
-          .toggles = list(time_ar = 1,
+          .toggles = list(ar_re = "surv",
                           est_surv = 1,
-                          movement = 1),
+                          movement = 1,
+                          est_init = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
 
 ##--- Convergence & estimates ----
 
-## all rhat's look good (no larger than 1.01)
+## r_hat for beta_s indicate convergence issues
 drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
-                                       "alpha", "tau",
+                                       "alpha", "sigma_t",
+                                       ## "sigma_s",
                                        "zeta", "phi"))
 
 ## the different chains are in agreement and converging.
@@ -317,12 +354,14 @@ drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
 drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
   mcmc_dens_overlay()
 
-drm_surv$stanfit$draws(variables = c("alpha", "tau",
-                                    "zeta", "phi")) |>
+drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
+                                     ## "sigma_s",
+                                     "zeta", "phi")) |>
   mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
 
-drm_surv$stanfit$draws(variables = c("alpha", "tau",
-                                    "zeta", "phi")) |>
+drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
+                                     ## "sigma_t",
+                                     "zeta", "phi")) |>
   mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
 ##--- surv and environment ----
@@ -590,8 +629,7 @@ bind_rows(fitted_sdm, for_sdm) |>
       bind_rows(fitted_surv, forecast_surv) |>
       mutate(model = "DRM (surv)")
   ) |>
-  filter(year > 1985) |>
-  filter(model != "DRM (rec)") |>
+  filter(model != "DRM (surv)") |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +

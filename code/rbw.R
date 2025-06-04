@@ -108,7 +108,7 @@ drm_rec <-
           ages_movement = c(0, 0,
                             rep(1, 8),
                             0, 0), ## ages allowed to move
-          .toggles = list(time_ar = 1,
+          .toggles = list(ar_re = "rec",
                           est_surv = 1,
                           movement = 1),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
@@ -248,7 +248,7 @@ drm_surv <-
           ages_movement = c(0, 0,
                             rep(1, 8),
                             0, 0), ## ages allowed to move
-          .toggles = list(time_ar = 1,
+          .toggles = list(ar_re = "rec",
                           est_surv = 1,
                           movement = 1),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
