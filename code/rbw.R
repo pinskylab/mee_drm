@@ -73,11 +73,11 @@ dat_test <- dat_test |>
 ##--- turning response into density: 1k individuals per km2 ----
 
 dat_train <- dat_train |>
-  mutate(dens = 1000 * y,
+  mutate(dens = 100 * y,
          .before = y)
 
 dat_test <- dat_test |>
-  mutate(dens = 1000 * y,
+  mutate(dens = 100 * y,
          .before = y)
 
 chains <- 4
@@ -93,6 +93,20 @@ adj_mat <-
 
 ##--- * Recruitment ----
 
+n_ages <- 12
+
+init_ldens <-
+  dat_train |>
+  filter(year < 1985) |>
+  summarise(dens = sum(area * dens) / sum(area)) |>
+  pull(dens)
+
+init_ldens <-
+  init_ldens *
+  seq(.9, .1, len = n_ages) / sum(seq(.9, .1, len = n_ages))
+
+init_ldens <- log(init_ldens[-1])
+
 drm_rec <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
@@ -105,12 +119,14 @@ drm_rec <-
           formula_surv = ~ 1,
           n_ages = 12,
           adj_mat = adj_mat, ## A matrix for movement routine
+          init_data = init_ldens,
           ages_movement = c(0, 0,
-                            rep(1, 8),
+                            rep(1, n_ages - 4),
                             0, 0), ## ages allowed to move
           .toggles = list(ar_re = "rec",
+                          movement = 1,
                           est_surv = 1,
-                          movement = 1),
+                          est_init = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
@@ -213,7 +229,7 @@ max_quad_x(betas_rec[, 2], betas_rec[, 3],
 
 ## all rhat's look good (no larger than 1.01)
 drm_rec$stanfit$summary(variables = c("beta_r", "beta_t",
-                                      "alpha", "tau",
+                                      "alpha", "sigma_t",
                                       "zeta", "phi"))
 
 ## the different chains are in agreement and converging.
@@ -223,11 +239,11 @@ drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
 drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
   mcmc_dens_overlay()
 
-drm_rec$stanfit$draws(variables = c("alpha", "tau",
+drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
                                     "zeta", "phi")) |>
   mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
 
-drm_rec$stanfit$draws(variables = c("alpha", "tau",
+drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
                                     "zeta", "phi")) |>
   mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
@@ -243,17 +259,41 @@ drm_surv <-
           formula_zero = ~ 1 + n_routes + c_tavg + c_lon + c_lat,
           formula_rec = ~ 1,
           formula_surv = ~ 1 + c_tavg + I(c_tavg * c_tavg),
-          n_ages = 12,
+          n_ages = n_ages,
           adj_mat = adj_mat, ## A matrix for movement routine
+          init_data = init_ldens,
           ages_movement = c(0, 0,
-                            rep(1, 8),
+                            rep(1, n_ages - 4),
                             0, 0), ## ages allowed to move
           .toggles = list(ar_re = "rec",
                           est_surv = 1,
-                          movement = 1),
+                          movement = 1,
+                          est_init = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
+
+##--- Convergence & estimates ----
+
+## all rhat's look good (no larger than 1.01)
+drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
+                                       "alpha", "sigma_t",
+                                       "zeta", "phi"))
+
+## the different chains are in agreement and converging.
+drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
+  mcmc_trace()
+
+drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
+  mcmc_dens_overlay()
+
+drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    "zeta", "phi")) |>
+  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
+
+drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    "zeta", "phi")) |>
+  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
 ##--- comparing some priors and posteriors ----
 
@@ -292,28 +332,6 @@ drm_surv$stanfit$draws(variables = c("beta_r")) |>
                 inherit.aes = FALSE,
                 color = 2,
                 lwd = 1.2)
-
-##--- Convergence & estimates ----
-
-## all rhat's look good (no larger than 1.01)
-drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
-                                       "alpha", "tau",
-                                       "zeta", "phi"))
-
-## the different chains are in agreement and converging.
-drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
-  mcmc_trace()
-
-drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
-  mcmc_dens_overlay()
-
-drm_surv$stanfit$draws(variables = c("alpha", "tau",
-                                    "zeta", "phi")) |>
-  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
-
-drm_surv$stanfit$draws(variables = c("alpha", "tau",
-                                    "zeta", "phi")) |>
-  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
 ##--- surv and environment ----
 
@@ -569,46 +587,7 @@ fitted_sdm <-
   select(year, id, lat, lon, dens) |>
   bind_cols(select(fitted_sdm, -pair))
 
-##--- Figure ? ----
-
-set.seed(2025)
-ids <- sample(seq_len(max(dat_train$id)),
-              size = 5)
-
-bind_rows(fitted_sdm, for_sdm) |>
-  mutate(model = "SDM") |>
-  bind_rows(
-      bind_rows(fitted_rec, forecast_rec) |>
-      mutate(model = "DRM (rec)"),
-      bind_rows(fitted_surv, forecast_surv) |>
-      mutate(model = "DRM (surv)")
-  ) |>
-  filter(model != "DRM (surv)") |>
-  filter(year > 1981) |>
-  filter(id %in% ids) |>
-  ggplot(data = _) +
-  geom_vline(xintercept = first_year_forecast,
-             lty = 2) +
-  geom_ribbon(aes(x = year,
-                  ymin = l, ymax = u,
-                  fill = model,
-                  color = model),
-              alpha = .4) +
-  geom_line(aes(x = year, y = m, color = model)) +
-  geom_point(aes(x = year, y = dens)) +
-  facet_grid(id ~ model) +
-  guides(color = "none",
-         fill = "none") +
-  labs(x = "Year",
-       y = "Density") +
-  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
-                                                   n = 3),
-                     trans = "log1p") +
-  theme_bw()
-
-ggsave(filename = "overleaf/img/forecasts_birds.pdf",
-       width = 6,
-       height = 8)
+##--- table ----
 
 aux_qt <-
   mutate(aux_qt,
@@ -645,12 +624,52 @@ for_sdm |>
                  digits = 2) |>
   print(include.rownames = FALSE)
 
+##--- Figure ? ----
+
+set.seed(2025)
+ids <- sample(seq_len(max(dat_train$id)),
+              size = 5)
+
+bind_rows(fitted_sdm, for_sdm) |>
+  mutate(model = "SDM") |>
+  bind_rows(
+      bind_rows(fitted_rec, forecast_rec) |>
+      mutate(model = "DRM (rec)"),
+      bind_rows(fitted_surv, forecast_surv) |>
+      mutate(model = "DRM (surv)")
+  ) |>
+  ## filter(model != "DRM (surv)") |>
+  filter(year > 1981) |>
+  filter(id %in% ids) |>
+  ggplot(data = _) +
+  geom_vline(xintercept = first_year_forecast,
+             lty = 2) +
+  geom_ribbon(aes(x = year,
+                  ymin = l, ymax = u,
+                  fill = model,
+                  color = model),
+              alpha = .4) +
+  geom_line(aes(x = year, y = m, color = model)) +
+  geom_point(aes(x = year, y = dens)) +
+  facet_grid(id ~ model) +
+  guides(color = "none",
+         fill = "none") +
+  labs(x = "Year",
+       y = "Density") +
+  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
+                                                   n = 3),
+                     trans = "log1p") +
+  theme_bw()
+
+ggsave(filename = "overleaf/img/forecasts_birds.pdf",
+       width = 6,
+       height = 8)
+
 ##--- saving some stuff ----
 
 saveRDS(sdm, file = "data/birds/models/sdm.rds")
 saveRDS(drm_rec, file = "data/birds/models/drm_rec.rds")
 saveRDS(drm_surv, file = "data/birds/models/drm_surv.rds")
-
 
 wood_out <-
   bind_rows(fitted_sdm, for_sdm) |>

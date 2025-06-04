@@ -24,7 +24,7 @@ polygons |>
 ##--- splitting data for validation ----
 
 ## reserving 5 years for forecast assessment
-first_year_forecast <- max(sum_fl$year) - 14
+first_year_forecast <- max(sum_fl$year) - 4
 
 ## "year to id"
 first_id_forecast <-
@@ -74,11 +74,11 @@ dat_test <- dat_test |>
 ##--- turning response into density: 1k individuals per km2 ----
 
 dat_train <- dat_train |>
-  mutate(dens = 1000 * y / area_km2,
+  mutate(dens = 100 * y / area_km2,
          .before = y)
 
 dat_test <- dat_test |>
-  mutate(dens = 1000 * y / area_km2,
+  mutate(dens = 100 * y / area_km2,
          .before = y)
 
 chains <- 4
@@ -331,7 +331,7 @@ drm_surv <-
           ages_movement = c(0, 0,
                             rep(1, 12),
                             0, 0), ## ages allowed to move
-          .toggles = list(ar_re = "surv",
+          .toggles = list(ar_re = "rec",
                           est_surv = 1,
                           movement = 1,
                           est_init = 0),
@@ -629,7 +629,7 @@ bind_rows(fitted_sdm, for_sdm) |>
       bind_rows(fitted_surv, forecast_surv) |>
       mutate(model = "DRM (surv)")
   ) |>
-  filter(model != "DRM (surv)") |>
+  ## filter(model != "DRM (surv)") |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +
@@ -639,7 +639,7 @@ bind_rows(fitted_sdm, for_sdm) |>
                   color = model),
               alpha = .4) +
   geom_line(aes(x = year, y = m, color = model)) +
-  geom_point(aes(x = year, y = dens)) +
+  geom_point(aes(x = year, y = dens), size = .5) +
   facet_grid(patch ~ model, scales = "free_y") +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
                                                    n = 3),
@@ -647,7 +647,7 @@ bind_rows(fitted_sdm, for_sdm) |>
   theme_bw() +
   guides(color = "none",
          fill = "none") +
-  labs(y = "Density",
+  labs(y = "Density (in hundreds of individuals per square-km)",
        x = "Year") +
   theme(strip.background = element_rect(fill = "white"))
 
