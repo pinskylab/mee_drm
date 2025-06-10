@@ -18,8 +18,12 @@ my_dt <- my_dt |>
          lat = st_coordinates(st_centroid(geometry))[, 2]) |>
   arrange(id, year)
 
-polygons <- my_dt |>
-  filter(year == min(year)) |>
+map <- my_dt |>
+  filter(year == max(year)) |>
+  select(id) |>
+  distinct()
+
+polygons <- map |>
   st_geometry()
 
 polygons |>
@@ -82,6 +86,27 @@ dat_test <- dat_test |>
 
 chains <- 4
 cores <- 4
+
+##--- fig 1 ----
+
+world <-
+  rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
+
+filter <- st_bbox(map) |>
+  st_as_sfc()
+
+bk <- st_intersection(world, filter) |>
+  st_as_sfc()
+
+map |>
+  left_join(filter(dat_train, year == 2011),
+            by = "id") |>
+  ggplot(data = _,
+         aes(fill = dens)) +
+  geom_sf(data = bk, inherit.aes = FALSE) +
+  geom_sf(alpha = .8) +
+  scale_fill_viridis_c(option = "H") +
+  theme_bw()
 
 ##--- fitting DRMs ----
 
@@ -733,7 +758,7 @@ wood_out |>
   filter(year > 1980) |>
   ggplot(data = _) +
   geom_sf(aes(fill = mape)) +
-  scale_fill_viridis_c(option = "H") +
+  scale_fill_viridis_c(option = "H", trans = "log") +
   facet_wrap(~ year) +
   theme_bw() +
   theme(axis.text.x = element_blank(),

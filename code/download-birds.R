@@ -75,11 +75,11 @@ states_merged <-
 my_grid <- st_make_grid(x = c_hull_pts, n = c(10, 10))
 
 filter_grid <-
-  st_intersects(my_grid,
-                c_hull_pts,
-                sparse = FALSE)
+  st_within(my_grid,
+            c_hull_pts,
+            sparse = FALSE)
 
-my_grid <- my_grid[filter_grid[, 1], ]
+my_grid <- st_intersection(my_grid, states_merged)
 
 plot(states_merged)
 plot(my_grid, col = scales::alpha(2, .2),
@@ -102,12 +102,20 @@ plot(my_grid, col = scales::alpha(4, .2),
 
 ##--- counting events per cell ----
 
-my_grid <- my_grid |>
+my_grid <-
+  my_grid |>
   st_as_sf() |>
+  mutate(id = row_number(),
+         .before = x) |>
+  st_cast("MULTIPOLYGON") |>
+  st_cast("POLYGON") |>
+  filter(st_area(x) > quantile(st_area(my_grid), .3)) |>
   mutate(id = row_number(),
          .before = x)
 
 st_geometry(my_grid) <- "geometry"
+
+rownames(my_grid) <- NULL
 
 my_map <- my_grid
 
