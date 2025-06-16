@@ -151,7 +151,8 @@ drm_rec <-
           .toggles = list(ar_re = "rec",
                           movement = 1,
                           est_surv = 1,
-                          est_init = 0),
+                          est_init = 0,
+                          minit = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
@@ -293,7 +294,8 @@ drm_surv <-
           .toggles = list(ar_re = "rec",
                           est_surv = 1,
                           movement = 1,
-                          est_init = 0),
+                          est_init = 0,
+                          minit = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
@@ -664,7 +666,6 @@ bind_rows(fitted_sdm, for_sdm) |>
       mutate(model = "DRM (surv)")
   ) |>
   ## filter(model != "DRM (surv)") |>
-  filter(year > 1981) |>
   filter(id %in% ids) |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,

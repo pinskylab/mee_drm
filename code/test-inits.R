@@ -141,6 +141,8 @@ ggplot() +
 
 ##--- DRM recruitment ----
 
+## initializing with data
+
 init_ldens <-
   dat_train |>
   filter(year < 1987) |>
@@ -271,13 +273,6 @@ rec_fig <-
 
 rec_fig
 
-gratio <- 0.5 * (1 + sqrt(5))
-
-ggsave(filename = "overleaf/img/recruitment.pdf",
-       plot = rec_fig,
-       width = 6,
-       height = 6 / gratio)
-
 ##--- * temperature that optimizes recruitment ----
 
 betas_rec <-
@@ -313,9 +308,11 @@ drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
                                     "zeta", "phi")) |>
   mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
-##--- DRM Survival ----
+##--- formula 2 ----
 
-drm_surv <-
+## estimating initialization
+
+drm_rec2 <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
@@ -323,74 +320,98 @@ drm_surv <-
           family = "gamma",
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
-          formula_rec = ~ 1,
-          formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_surv = ~ 1,
           f_mort = f_train,
           n_ages = NROW(f_train),
-          init_data = init_ldens,
           adj_mat = adj_mat, ## A matrix for movement routine
           ages_movement = c(0, 0,
                             rep(1, 12),
                             0, 0), ## ages allowed to move
           .toggles = list(ar_re = "rec",
-                          est_surv = 1,
                           movement = 1,
-                          est_init = 0,
+                          est_surv = 1,
+                          est_init = 1,
                           minit = 0),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
 
-##--- Convergence & estimates ----
+##--- comparing some priors and posteriors ----
 
-## r_hat for beta_s indicate convergence issues
-drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
-                                       "alpha", "sigma_t",
-                                       ## "sigma_s",
-                                       "zeta", "phi"))
+drm_rec2$stanfit$draws(variables = c("phi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dgamma(x, shape = 1, rate = .1),
+                xlim = c(0, 3),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
 
-## the different chains are in agreement and converging.
-drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
-  mcmc_trace()
+drm_rec2$stanfit$draws(variables = c("alpha")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_rec2$data$pr_alpha_a,
+                                 shape2 = drm_rec2$data$pr_alpha_b),
+                xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
 
-drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
-  mcmc_dens_overlay()
+drm_rec2$stanfit$draws(variables = c("zeta")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_rec2$data$pr_zeta_a,
+                                 shape2 = drm_rec2$data$pr_zeta_b),
+                xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
 
-drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
-                                     ## "sigma_s",
-                                     "zeta", "phi")) |>
-  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
+drm_rec2$stanfit$draws(variables = c("sigma_t")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dlnorm(x,
+                                  meanlog = drm_rec2$data$pr_lsigma_t_mu,
+                                  sdlog = drm_rec2$data$pr_lsigma_t_sd),
+                xlim = c(0, .5),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
 
-drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
-                                     ## "sigma_t",
-                                     "zeta", "phi")) |>
-  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
+##--- Viz relationships ----
 
-##--- surv and environment ----
+## * make this into a function!
+## ** that is far from easy!
 
-newdata_surv <- data.frame(c_btemp =
-                             seq(from = quantile(dat_train$c_btemp, .05),
-                                 to = quantile(dat_train$c_btemp, .95),
-                                 length.out = 200))
+## recruitment
 
-surv_samples <- marg_surv(drm_surv, newdata_surv)
+newdata_rec <- data.frame(c_stemp =
+                            seq(from = quantile(dat_train$c_stemp, .05),
+                                to = quantile(dat_train$c_stemp, .95),
+                                length.out = 200))
 
-surv_samples <- surv_samples |>
-  mutate(btemp = c_btemp + avgs["btemp"])
+rec_samples <- marg_rec(drm_rec2, newdata_rec)
 
-surv_summary <-
-  surv_samples |>
-  group_by(btemp) |>
-  summarise(ll = quantile(survival, probs = .05),
-            l = quantile(survival, probs = .1),
-            m = median(survival),
-            u = quantile(survival, probs = .9),
-            uu = quantile(survival, probs = .95)) |>
-  ungroup()
+rec_samples <- rec_samples |>
+  mutate(stemp = c_stemp + avgs["stemp"])
 
-surv_fig <-
-  ggplot(data = surv_summary,
-         aes(x = btemp,
+rec_summary <-
+  rec_samples |>
+  group_by(stemp) |>
+  summarise(ll = quantile(recruitment, probs = .05),
+            l = quantile(recruitment, probs = .1),
+            m = median(recruitment),
+            u = quantile(recruitment, probs = .9),
+            uu = quantile(recruitment, probs = .95)) |>
+  ungroup() |>
+  mutate(model = "drm_rec2")
+
+rec_fig2 <-
+  ggplot(data = rec_summary,
+         aes(x = stemp,
              y = m)) +
   geom_ribbon(aes(ymin = l, ymax = u),
               fill = "gray50",
@@ -398,55 +419,213 @@ surv_fig <-
               linewidth = 1.2) +
   geom_line(color = "white", linewidth = 1.2) +
   theme_bw() +
-  labs(x = "SBT (in Celsius)",
-       y = "Est. survival")
+  guides(fill = "none") +
+  labs(color = "Model",
+       fill = "Model",
+       x = "SST (in Celsius)",
+       y = "Est. recruitment (per km2)") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(0.175, 0.75))
 
-surv_fig
+rec_fig2
 
-ggsave(filename = "overleaf/img/surv.pdf",
-       plot = surv_fig,
-       width = 6,
-       height = 6 / gratio)
+##--- * temperature that optimizes recruitment ----
 
-##--- Panel for recruitment and survival ----
-
-rec_fig + surv_fig +
-  plot_annotation(tag_levels = "A") &
-  theme(plot.tag = element_text(size = 10))
-
-ggsave(filename = "overleaf/img/rec_surv.pdf",
-       width = 7,
-       height = .75 * 7 / gratio)
-
-##--- ** obtaining the SBT that maximizes surival ----
-
-betas_surv <-
-  drm_surv$stanfit$draws(variables = "beta_s",
+betas_rec <-
+  drm_rec2$stanfit$draws(variables = "beta_r",
                          format = "matrix")
 
-max_quad_x(betas_surv[, 2], betas_surv[, 3],
-           offset = avgs["btemp"]) |>
+max_quad_x(betas_rec[, 2], betas_rec[, 3],
+           offset = avgs["stemp"]) |>
   apply(2, quantile, probs = c(.1, .5, .9))
 
-##--- * SDM ----
+##--- Convergence & estimates ----
 
-sdm <-
-  fit_sdm(.data = dat_train,
+## all rhat's look good (no larger than 1.01)
+drm_rec2$stanfit$summary(variables = c("beta_r", "beta_t",
+                                       "alpha", "sigma_t",
+                                       ## "sigma_s",
+                                       "zeta", "phi"))
+
+## the different chains are in agreement and converging.
+drm_rec2$stanfit$draws(variables = c("beta_r", "beta_t")) |>
+  mcmc_trace()
+
+drm_rec2$stanfit$draws(variables = c("beta_r", "beta_t")) |>
+  mcmc_dens_overlay()
+
+drm_rec2$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    ## "sigma_s",
+                                    "zeta", "phi")) |>
+  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
+
+drm_rec2$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    ## "sigma_s",
+                                    "zeta", "phi")) |>
+  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
+
+## estimating initialization with mortality
+
+drm_rec3 <-
+  fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
           time_col = "year", ## vector of time points
           site_col = "patch",
-          family = "lognormal",
+          family = "gamma",
           seed = 202505,
           formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
-          formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          formula_surv = ~ 1,
+          f_mort = f_train,
+          n_ages = NROW(f_train),
+          adj_mat = adj_mat, ## A matrix for movement routine
+          ages_movement = c(0, 0,
+                            rep(1, 12),
+                            0, 0), ## ages allowed to move
+          .toggles = list(ar_re = "rec",
+                          movement = 1,
+                          est_surv = 1,
+                          minit = 1),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
-                         pr_alpha_a = 4.2, pr_alpha_b = 5.8))
+                         pr_alpha_a = 4.2, pr_alpha_b = 5.8,
+                         pr_zeta_a = 7, pr_zeta_b = 3))
+
+##--- comparing some priors and posteriors ----
+
+drm_rec3$stanfit$draws(variables = c("phi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dgamma(x, shape = 1, rate = .1),
+                xlim = c(0, 3),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_rec3$stanfit$draws(variables = c("alpha")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_rec3$data$pr_alpha_a,
+                                 shape2 = drm_rec3$data$pr_alpha_b),
+                xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_rec3$stanfit$draws(variables = c("zeta")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_rec3$data$pr_zeta_a,
+                                 shape2 = drm_rec3$data$pr_zeta_b),
+                xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_rec3$stanfit$draws(variables = c("sigma_t")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dlnorm(x,
+                                  meanlog = drm_rec3$data$pr_lsigma_t_mu,
+                                  sdlog = drm_rec3$data$pr_lsigma_t_sd),
+                xlim = c(0, .5),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+##--- Viz relationships ----
+
+## * make this into a function!
+## ** that is far from easy!
+
+## recruitment
+
+newdata_rec <- data.frame(c_stemp =
+                            seq(from = quantile(dat_train$c_stemp, .05),
+                                to = quantile(dat_train$c_stemp, .95),
+                                length.out = 200))
+
+rec_samples <- marg_rec(drm_rec3, newdata_rec)
+
+rec_samples <- rec_samples |>
+  mutate(stemp = c_stemp + avgs["stemp"])
+
+rec_summary <-
+  rec_samples |>
+  group_by(stemp) |>
+  summarise(ll = quantile(recruitment, probs = .05),
+            l = quantile(recruitment, probs = .1),
+            m = median(recruitment),
+            u = quantile(recruitment, probs = .9),
+            uu = quantile(recruitment, probs = .95)) |>
+  ungroup() |>
+  mutate(model = "drm_rec3")
+
+rec_fig3 <-
+  ggplot(data = rec_summary,
+         aes(x = stemp,
+             y = m)) +
+  geom_ribbon(aes(ymin = l, ymax = u),
+              fill = "gray50",
+              color = "transparent",
+              linewidth = 1.2) +
+  geom_line(color = "white", linewidth = 1.2) +
+  theme_bw() +
+  guides(fill = "none") +
+  labs(color = "Model",
+       fill = "Model",
+       x = "SST (in Celsius)",
+       y = "Est. recruitment (per km2)") +
+  theme(legend.position = "inside",
+        legend.position.inside = c(0.175, 0.75))
+
+rec_fig3
+
+##--- * temperature that optimizes recruitment ----
+
+betas_rec <-
+  drm_rec3$stanfit$draws(variables = "beta_r",
+                         format = "matrix")
+
+max_quad_x(betas_rec[, 2], betas_rec[, 3],
+           offset = avgs["stemp"]) |>
+  apply(2, quantile, probs = c(.1, .5, .9))
+
+##--- Convergence & estimates ----
+
+## all rhat's look good (no larger than 1.01)
+drm_rec3$stanfit$summary(variables = c("beta_r", "beta_t",
+                                       "alpha", "sigma_t",
+                                       ## "sigma_s",
+                                       "zeta", "phi"))
+
+## the different chains are in agreement and converging.
+drm_rec3$stanfit$draws(variables = c("beta_r", "beta_t")) |>
+  mcmc_trace()
+
+drm_rec3$stanfit$draws(variables = c("beta_r", "beta_t")) |>
+  mcmc_dens_overlay()
+
+drm_rec3$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    ## "sigma_s",
+                                    "zeta", "phi")) |>
+  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
+
+drm_rec3$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    ## "sigma_s",
+                                    "zeta", "phi")) |>
+  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
+
+## checking figs
+
+rec_fig | rec_fig2 | rec_fig3
 
 ##--- * model comparison ----
 
-loos <- list("drec"  = drm_rec$stanfit$loo(),
-             "dsurv" = drm_surv$stanfit$loo(),
-             "sdm"   = sdm$stanfit$loo())
+loos <- list("init_data" = drm_rec$stanfit$loo(),
+             "init_est"  = drm_rec3$stanfit$loo(),
+             "init_mort" = drm_rec3$stanfit$loo())
 
 loos_out <- loo::loo_compare(loos)
 
@@ -468,18 +647,21 @@ forecast_rec <- predict_drm(drm = drm_rec,
                             seed = 125,
                             cores = 4)
 
-forecast_surv <- predict_drm(drm = drm_surv,
+forecast_rec2 <- predict_drm(drm = drm_rec2,
                              new_data = dat_test,
                              past_data = filter(dat_train,
                                                 year == max(year)),
                              seed = 125,
                              cores = 4)
 
-forecast_sdm <-
-  predict_sdm(sdm = sdm,
-              new_data = dat_test,
-              seed = 125,
-              cores = 4)
+forecast_rec3 <- predict_drm(drm = drm_rec3,
+                             new_data = dat_test,
+                             past_data = filter(dat_train,
+                                                year == max(year)),
+                             seed = 125,
+                             cores = 4)
+
+##--- proc ----
 
 ##--- Viz predicted and observed ----
 
@@ -529,9 +711,13 @@ fitted_rec <-
   select(year, patch, lat_floor, dens) |>
   bind_cols(select(fitted_rec, -pair))
 
-fitted_surv <-
-  drm_surv$stanfit$draws(variables = "y_pp",
-                         format = "draws_df") |>
+##--- f2 ----
+
+##--- Viz predicted and observed ----
+
+fitted_rec2 <-
+  drm_rec2$stanfit$draws(variables = "y_pp",
+                        format = "draws_df") |>
   tidyr::pivot_longer(cols = starts_with("y_pp"),
                       names_to = "pair",
                       values_to = "expected") |>
@@ -546,54 +732,8 @@ fitted_surv <-
   mutate(pair = as.integer(pair)) |>
   arrange(pair)
 
-forecasts_surv <-
-  forecast_surv$draws(variables = "y_proj",
-                      format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_proj"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05, na.rm = TRUE),
-            l = quantile(expected, probs = .1, na.rm = TRUE),
-            m = median(expected, na.rm = TRUE),
-            u = quantile(expected, probs = .9, na.rm = TRUE),
-            uu = quantile(expected, probs = .95, na.rm = TRUE)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-forecast_surv <-
-  dat_test |>
-  select(year, patch, lat_floor, dens) |>
-  mutate(pair = row_number(), .before = 1) |>
-  left_join(forecasts_surv, by = "pair") |>
-  select(- pair)
-
-fitted_surv <-
-  dat_train |>
-  select(year, patch, lat_floor, dens) |>
-  bind_cols(select(fitted_surv, -pair))
-
-fitted_sdm <-
-  sdm$stanfit$draws(variables = "y_pp",
-                       format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_pp"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05),
-            l = quantile(expected, probs = .1),
-            m = median(expected),
-            u = quantile(expected, probs = .9),
-            uu = quantile(expected, probs = .95)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_sdm <-
-  forecast_sdm$draws(variables = "y_proj",
+forecast_rec2 <-
+  forecast_rec2$draws(variables = "y_proj",
                      format = "draws_df") |>
   tidyr::pivot_longer(cols = starts_with("y_proj"),
                       names_to = "pair",
@@ -609,28 +749,78 @@ for_sdm <-
   mutate(pair = as.integer(pair)) |>
   arrange(pair)
 
-for_sdm <-
+forecast_rec2 <-
   dat_test |>
   select(year, patch, lat_floor, dens) |>
   mutate(pair = row_number(), .before = 1) |>
-  left_join(for_sdm, by = "pair") |>
+  left_join(forecast_rec2, by = "pair") |>
   select(- pair)
 
-fitted_sdm <-
+fitted_rec2 <-
   dat_train |>
   select(year, patch, lat_floor, dens) |>
-  bind_cols(select(fitted_sdm, -pair))
+  bind_cols(select(fitted_rec2, -pair))
 
-##--- Figure 1 ----
+##--- f3 ----
 
-bind_rows(fitted_sdm, for_sdm) |>
-  mutate(model = "SDM") |>
-  bind_rows(
-      bind_rows(fitted_rec, forecast_rec) |>
-      mutate(model = "DRM (rec)"),
-      bind_rows(fitted_surv, forecast_surv) |>
-      mutate(model = "DRM (surv)")
-  ) |>
+##--- Viz predicted and observed ----
+
+fitted_rec3 <-
+  drm_rec3$stanfit$draws(variables = "y_pp",
+                        format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("y_pp"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+forecast_rec3 <-
+  forecast_rec3$draws(variables = "y_proj",
+                     format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("y_proj"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+forecast_rec3 <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(forecast_rec3, by = "pair") |>
+  select(- pair)
+
+fitted_rec3 <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_rec3, -pair))
+
+##--- comparing!! ----
+
+bind_rows(
+    bind_rows(fitted_rec, forecast_rec) |>
+    mutate(model = "data"),
+    bind_rows(fitted_rec3, forecast_rec3) |>
+    mutate(model = "est"),
+    bind_rows(fitted_rec3, forecast_rec3) |>
+    mutate(model = "mort")
+) |>
   ## filter(model != "DRM (surv)") |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
@@ -653,24 +843,22 @@ bind_rows(fitted_sdm, for_sdm) |>
        x = "Year") +
   theme(strip.background = element_rect(fill = "white"))
 
-ggsave(filename = "overleaf/img/forecast_sf.pdf",
-       width = 6,
-       height = 7)
-
 aux_qt <-
-  mutate(aux_qt,
-         Model = case_when(Model == "sdm"  ~ "SDM",
-                           Model == "drec" ~ "DRM (rec)",
-                           TRUE            ~ "DRM (surv)"))
+  data.frame(Model = names(loos),
+             delta_LOOIC = loos_out[order(rownames(loos_out)), 1],
+             LOOIC = sapply(loos, \(x) x$estimates[3, 1])) |>
+  mutate(Model = case_when(Model == "init_data" ~ "data",
+                           Model == "init_est"  ~ "est",
+                           TRUE                 ~ "mort"))
 
-for_sdm |>
-  mutate(model = "SDM") |>
-  bind_rows(
-      forecast_rec |>
-      mutate(model = "DRM (rec)"),
-      forecast_surv |>
-      mutate(model = "DRM (surv)")
-  ) |>
+bind_rows(
+    forecast_rec |>
+    mutate(model = "data"),
+    forecast_rec2 |>
+    mutate(model = "est"),
+    forecast_rec3 |>
+    mutate(model = "mort")
+) |>
   mutate(bias = dens - m) |>
   mutate(rmse = bias * bias) |>
   mutate(is = int_score(dens, l = l, u = u, alpha = .2)) |>
@@ -691,3 +879,13 @@ for_sdm |>
   xtable::xtable(caption = "Forecasting skill according to different metrics",
                  digits = 2) |>
   print(include.rownames = FALSE)
+
+##--- comparing estimates ----
+
+drm_rec2$stanfit$summary(variables = c("beta_r", "beta_t",
+                                      "alpha", "sigma_t",
+                                      "zeta", "phi"))
+
+drm_rec3$stanfit$summary(variables = c("beta_r", "beta_t",
+                                       "alpha", "sigma_t",
+                                       "zeta", "phi"))
