@@ -442,21 +442,6 @@ sdm <-
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8))
 
-##--- * model comparison ----
-
-loos <- list("drec"  = drm_rec$stanfit$loo(),
-             "dsurv" = drm_surv$stanfit$loo(),
-             "sdm"   = sdm$stanfit$loo())
-
-loos_out <- loo::loo_compare(loos)
-
-##--- * some quantities for model comparison ----
-
-aux_qt <-
-  data.frame(Model = names(loos),
-             delta_LOOIC = loos_out[order(rownames(loos_out)), 1],
-             LOOIC = sapply(loos, \(x) x$estimates[3, 1]))
-
 ##--- forecasting ----
 
 ##--- * DRM ----
@@ -466,6 +451,7 @@ forecast_rec <- predict_drm(drm = drm_rec,
                             past_data = filter(dat_train,
                                                year == max(year)),
                             seed = 125,
+                            f_test = f_test,
                             cores = 4)
 
 forecast_surv <- predict_drm(drm = drm_surv,
@@ -473,6 +459,7 @@ forecast_surv <- predict_drm(drm = drm_surv,
                              past_data = filter(dat_train,
                                                 year == max(year)),
                              seed = 125,
+                             f_test = f_test,
                              cores = 4)
 
 forecast_sdm <-
@@ -657,12 +644,6 @@ ggsave(filename = "overleaf/img/forecast_sf.pdf",
        width = 6,
        height = 7)
 
-aux_qt <-
-  mutate(aux_qt,
-         Model = case_when(Model == "sdm"  ~ "SDM",
-                           Model == "drec" ~ "DRM (rec)",
-                           TRUE            ~ "DRM (surv)"))
-
 for_sdm |>
   mutate(model = "SDM") |>
   bind_rows(
@@ -683,10 +664,7 @@ for_sdm |>
   rename("Model" = "MODEL",
          "IS (80%)" = "IS",
          "PIC (80%)" = "CVG") |>
-  left_join(aux_qt,
-            by = "Model") |>
-  arrange(LOOIC) |>
-  relocate(LOOIC, delta_LOOIC, .after = "Model") |>
+  arrange(RMSE) |>
   print() |>
   xtable::xtable(caption = "Forecasting skill according to different metrics",
                  digits = 2) |>
