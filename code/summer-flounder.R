@@ -160,7 +160,7 @@ drm_rec <-
           site_col = "patch",
           family = "gamma",
           seed = 202505,
-          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_zero = ~ 1 + c_hauls,
           formula_rec = ~ 1 + c_stemp + I(c_stemp * c_stemp),
           formula_surv = ~ 1,
           f_mort = f_train,
@@ -322,7 +322,7 @@ drm_surv <-
           site_col = "patch",
           family = "gamma",
           seed = 202505,
-          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_zero = ~ 1 + c_hauls,
           formula_rec = ~ 1,
           formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
           f_mort = f_train,
@@ -437,7 +437,7 @@ sdm <-
           site_col = "patch",
           family = "lognormal",
           seed = 202505,
-          formula_zero = ~ 1 + c_hauls + c_btemp + c_stemp,
+          formula_zero = ~ 1 + c_hauls,
           formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8))
@@ -487,7 +487,7 @@ fitted_rec <-
   mutate(pair = as.integer(pair)) |>
   arrange(pair)
 
-forecast_rec <-
+for_rec <-
   forecast_rec$draws(variables = "y_proj",
                      format = "draws_df") |>
   tidyr::pivot_longer(cols = starts_with("y_proj"),
@@ -504,11 +504,11 @@ forecast_rec <-
   mutate(pair = as.integer(pair)) |>
   arrange(pair)
 
-forecast_rec <-
+for_rec <-
   dat_test |>
   select(year, patch, lat_floor, dens) |>
   mutate(pair = row_number(), .before = 1) |>
-  left_join(forecast_rec, by = "pair") |>
+  left_join(for_rec, by = "pair") |>
   select(- pair)
 
 fitted_rec <-
@@ -533,7 +533,7 @@ fitted_surv <-
   mutate(pair = as.integer(pair)) |>
   arrange(pair)
 
-forecasts_surv <-
+for_surv <-
   forecast_surv$draws(variables = "y_proj",
                       format = "draws_df") |>
   tidyr::pivot_longer(cols = starts_with("y_proj"),
@@ -550,11 +550,11 @@ forecasts_surv <-
   mutate(pair = as.integer(pair)) |>
   arrange(pair)
 
-forecast_surv <-
+for_surv <-
   dat_test |>
   select(year, patch, lat_floor, dens) |>
   mutate(pair = row_number(), .before = 1) |>
-  left_join(forecasts_surv, by = "pair") |>
+  left_join(for_surv, by = "pair") |>
   select(- pair)
 
 fitted_surv <-
@@ -613,9 +613,9 @@ fitted_sdm <-
 bind_rows(fitted_sdm, for_sdm) |>
   mutate(model = "SDM") |>
   bind_rows(
-      bind_rows(fitted_rec, forecast_rec) |>
+      bind_rows(fitted_rec, for_rec) |>
       mutate(model = "DRM (rec)"),
-      bind_rows(fitted_surv, forecast_surv) |>
+      bind_rows(fitted_surv, for_surv) |>
       mutate(model = "DRM (surv)")
   ) |>
   ## filter(model != "DRM (surv)") |>
@@ -669,3 +669,213 @@ for_sdm |>
   xtable::xtable(caption = "Forecasting skill according to different metrics",
                  digits = 2) |>
   print(include.rownames = FALSE)
+
+##--- densities (theoretical means) ----
+
+fitted_rec <-
+  drm_rec$stanfit$draws(variables = "mu",
+                        format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("mu"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+for_rec <-
+  forecast_rec$draws(variables = "mu_proj",
+                     format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("mu_proj"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+for_rec <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(for_rec, by = "pair") |>
+  select(- pair)
+
+fitted_rec <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_rec, -pair))
+
+fitted_surv <-
+  drm_surv$stanfit$draws(variables = "mu",
+                         format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("mu"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+for_surv <-
+  forecast_surv$draws(variables = "mu_proj",
+                      format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("mu_proj"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05, na.rm = TRUE),
+            l = quantile(expected, probs = .1, na.rm = TRUE),
+            m = median(expected, na.rm = TRUE),
+            u = quantile(expected, probs = .9, na.rm = TRUE),
+            uu = quantile(expected, probs = .95, na.rm = TRUE)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+for_surv <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(for_surv, by = "pair") |>
+  select(- pair)
+
+fitted_surv <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_surv, -pair))
+
+fitted_sdm <-
+  sdm$stanfit$draws(variables = "mu",
+                       format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("mu"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+for_sdm <-
+  forecast_sdm$draws(variables = "mu_proj",
+                     format = "draws_df") |>
+  tidyr::pivot_longer(cols = starts_with("mu_proj"),
+                      names_to = "pair",
+                      values_to = "expected") |>
+  group_by(pair) |>
+  summarise(ll = quantile(expected, probs = .05),
+            l = quantile(expected, probs = .1),
+            m = median(expected),
+            u = quantile(expected, probs = .9),
+            uu = quantile(expected, probs = .95)) |>
+  ungroup() |>
+  mutate(pair = gsub("\\D", "", pair)) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+for_sdm <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(for_sdm, by = "pair") |>
+  select(- pair)
+
+fitted_sdm <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_sdm, -pair))
+
+##--- Figure 1 ----
+
+bind_rows(fitted_sdm, for_sdm) |>
+  mutate(model = "SDM") |>
+  bind_rows(
+      bind_rows(fitted_rec, for_rec) |>
+      mutate(model = "DRM (rec)"),
+      bind_rows(fitted_surv, for_surv) |>
+      mutate(model = "DRM (surv)")
+  ) |>
+  ## filter(model != "DRM (surv)") |>
+  ggplot(data = _) +
+  geom_vline(xintercept = first_year_forecast,
+             lty = 2) +
+  geom_ribbon(aes(x = year,
+                  ymin = l, ymax = u,
+                  fill = model,
+                  color = model),
+              alpha = .4) +
+  geom_line(aes(x = year, y = m, color = model)) +
+  geom_point(aes(x = year, y = dens), size = .5) +
+  facet_grid(patch ~ model, scales = "free_y") +
+  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
+                                                   n = 3),
+                     trans = "log1p") +
+  theme_bw() +
+  guides(color = "none",
+         fill = "none") +
+  labs(y = "Density (in hundreds of individuals per square-km)",
+       x = "Year") +
+  theme(strip.background = element_rect(fill = "white"))
+
+##--- relationship between mu and rho ----
+
+rho_mu <-
+  drm_rec$stanfit$summary(variables = c("y_pp", "mu", "rho")) |>
+  mutate(pair = gsub("\\D", "", variable),
+         parameter = gsub("\\W", "", substr(variable, 1, 3)),
+         .before = variable) |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
+
+rho_mu |>
+  select(pair, parameter, median, q5, q95) |>
+  tidyr::pivot_wider(names_from = parameter,
+                     values_from = median:q95) |>
+  ggplot(data = _,
+         aes(x = median_rho,
+             y = median_mu)) +
+  geom_point() +
+  ## geom_linerange(aes(ymin = q5_mu,
+  ##                    ymax = q95_mu)) +
+  ## geom_linerange(aes(xmin = q5_rho,
+  ##                    xmax = q95_rho)) +
+  theme_bw()
+
+rho_mu |>
+  select(pair, parameter, median, q5, q95) |>
+  tidyr::pivot_wider(names_from = parameter,
+                     values_from = median:q95) |>
+  ggplot(data = _,
+         aes(x = median_mu,
+             y = median_y_p)) +
+  geom_point() +
+  ## geom_linerange(aes(ymin = q5_mu,
+  ##                    ymax = q95_mu)) +
+  ## geom_linerange(aes(xmin = q5_rho,
+  ##                    xmax = q95_rho)) +
+  theme_bw()
