@@ -578,12 +578,15 @@ fitted_rec_new <-
 
 ##--- Figure 1 ----
 
-bind_rows(
-    bind_rows(fitted_rec_old, for_rec_old) |>
-    mutate(model = "DRM (old)"),
-    bind_rows(fitted_rec_new, for_rec_new) |>
-    mutate(model = "DRM (new)")
-) |>
+fitted_all <-
+  bind_rows(
+      bind_rows(fitted_rec_old, for_rec_old) |>
+      mutate(model = "DRM (old)"),
+      bind_rows(fitted_rec_new, for_rec_new) |>
+      mutate(model = "DRM (new)")
+  )
+
+fitted_all |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +
@@ -701,12 +704,15 @@ fitted_rec_new <-
 
 ##--- Figure 1 ----
 
-bind_rows(
-    bind_rows(fitted_rec_old, for_rec_old) |>
-    mutate(model = "DRM (old)"),
-    bind_rows(fitted_rec_new, for_rec_new) |>
-    mutate(model = "DRM (new)")
-) |>
+theoretical_all <-
+  bind_rows(
+      bind_rows(fitted_rec_old, for_rec_old) |>
+      mutate(model = "DRM (old)"),
+      bind_rows(fitted_rec_new, for_rec_new) |>
+      mutate(model = "DRM (new)")
+  )
+
+theoretical_all |>
   ## filter(model != "DRM (surv)") |>
   ggplot(data = _) +
   geom_vline(xintercept = first_year_forecast,
@@ -719,7 +725,8 @@ bind_rows(
   geom_line(aes(x = year, y = m, color = model)) +
   geom_point(aes(x = year, y = dens), size = .5) +
   facet_grid(patch ~ model, scales = "free_y") +
-  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
+  scale_y_continuous(breaks = scales::trans_breaks(identity,
+                                                   identity,
                                                    n = 3),
                      trans = "log1p") +
   theme_bw() +
@@ -732,7 +739,8 @@ bind_rows(
 ##--- relationship between mu and rho ----
 
 rho_mu <-
-  drm_rec_old$stanfit$summary(variables = c("y_pp", "mu", "rho")) |>
+  drm_rec_old$stanfit$summary(variables = c("y_pp",
+                                            "mu", "rho")) |>
   mutate(pair = gsub("\\D", "", variable),
          parameter = gsub("\\W", "", substr(variable, 1, 3)),
          .before = variable) |>
@@ -747,11 +755,15 @@ rho_mu |>
          aes(x = median_rho,
              y = median_mu)) +
   geom_point() +
+  geom_abline(intercept = 0, slope = 1,
+              col = 2) +
   ## geom_linerange(aes(ymin = q5_mu,
   ##                    ymax = q95_mu)) +
   ## geom_linerange(aes(xmin = q5_rho,
   ##                    xmax = q95_rho)) +
-  theme_bw()
+  theme_bw() +
+  labs(y = expression(hat(y)),
+       x = expression(mu))
 
 rho_mu |>
   select(pair, parameter, median, q5, q95) |>
@@ -761,8 +773,12 @@ rho_mu |>
          aes(x = median_mu,
              y = median_y_p)) +
   geom_point() +
+  geom_abline(intercept = 0, slope = 1,
+              col = 2) +
   ## geom_linerange(aes(ymin = q5_mu,
   ##                    ymax = q95_mu)) +
   ## geom_linerange(aes(xmin = q5_rho,
   ##                    xmax = q95_rho)) +
-  theme_bw()
+  theme_bw() +
+  labs(y = expression(hat(y)),
+       x = expression(mu))
