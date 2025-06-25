@@ -141,18 +141,6 @@ ggplot() +
 
 ##--- DRM recruitment ----
 
-init_ldens <-
-  dat_train |>
-  filter(year < 1987) |>
-  summarise(dens = sum(area_km2 * dens) / sum(area_km2)) |>
-  pull(dens)
-
-init_ldens <-
-  init_ldens *
-  seq(.9, .1, len = NROW(f_train)) / sum(seq(.9, .1, len = NROW(f_train)))
-
-init_ldens <- log(init_ldens[-1])
-
 drm_rec <-
   fit_drm(.data = dat_train,
           y_col = "dens", ## response variable: density
@@ -165,7 +153,6 @@ drm_rec <-
           formula_surv = ~ 1,
           f_mort = f_train,
           n_ages = NROW(f_train),
-          init_data = init_ldens,
           adj_mat = adj_mat, ## A matrix for movement routine
           ages_movement = c(0, 0,
                             rep(1, 12),
@@ -174,7 +161,7 @@ drm_rec <-
                           movement = 1,
                           est_surv = 1,
                           est_init = 0,
-                          minit = 0),
+                          minit = 1),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
@@ -291,9 +278,12 @@ max_quad_x(betas_rec[, 2], betas_rec[, 3],
 ##--- Convergence & estimates ----
 
 ## all rhat's look good (no larger than 1.01)
+drm_rec$stanfit$summary(variables = c("beta_r"))
+
+
 drm_rec$stanfit$summary(variables = c("beta_r", "beta_t",
                                       "alpha", "sigma_t",
-                                      ## "sigma_s",
+                                      "xi",
                                       "zeta", "phi"))
 
 ## the different chains are in agreement and converging.
@@ -327,7 +317,6 @@ drm_surv <-
           formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
           f_mort = f_train,
           n_ages = NROW(f_train),
-          init_data = init_ldens,
           adj_mat = adj_mat, ## A matrix for movement routine
           ages_movement = c(0, 0,
                             rep(1, 12),
@@ -336,7 +325,7 @@ drm_surv <-
                           est_surv = 1,
                           movement = 1,
                           est_init = 0,
-                          minit = 0),
+                          minit = 1),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
@@ -346,7 +335,7 @@ drm_surv <-
 ## r_hat for beta_s indicate convergence issues
 drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
                                        "alpha", "sigma_t",
-                                       ## "sigma_s",
+                                       "xi",
                                        "zeta", "phi"))
 
 ## the different chains are in agreement and converging.
@@ -357,12 +346,12 @@ drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
   mcmc_dens_overlay()
 
 drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
-                                     ## "sigma_s",
+                                     "xi",
                                      "zeta", "phi")) |>
   mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
 
 drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
-                                     ## "sigma_t",
+                                     "xi",
                                      "zeta", "phi")) |>
   mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
 
@@ -440,7 +429,8 @@ sdm <-
           formula_zero = ~ 1 + c_hauls,
           formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
-                         pr_alpha_a = 4.2, pr_alpha_b = 5.8))
+                         pr_alpha_a = 4.2, pr_alpha_b = 5.8),
+          .toggles = list(rho_mu = 0))
 
 ##--- forecasting ----
 
@@ -647,9 +637,9 @@ ggsave(filename = "overleaf/img/forecast_sf.pdf",
 for_sdm |>
   mutate(model = "SDM") |>
   bind_rows(
-      forecast_rec |>
+      for_rec |>
       mutate(model = "DRM (rec)"),
-      forecast_surv |>
+      for_surv |>
       mutate(model = "DRM (surv)")
   ) |>
   mutate(bias = dens - m) |>
