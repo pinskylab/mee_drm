@@ -139,8 +139,9 @@ drm_rec <-
           site_col = "id",
           family = "gamma",
           seed = 202505,
-          formula_zero = ~ 1 + n_routes + c_tavg + c_lon + c_lat,
-          formula_rec = ~ 1 + c_tavg + I(c_tavg * c_tavg),
+          formula_zero = ~ 1 + n_routes,
+          formula_rec = ~ 1 + c_lon + c_lat +
+            c_tavg + I(c_tavg * c_tavg),
           formula_surv = ~ 1,
           n_ages = 12,
           adj_mat = adj_mat, ## A matrix for movement routine
@@ -186,6 +187,21 @@ drm_rec$stanfit$draws(variables = c("zeta")) |>
                 color = 2,
                 lwd = 1.2)
 
+drm_rec$stanfit$draws(variables = c("xi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) {
+    y <- - x
+    dnorm(log(y),
+          mean = drm_rec$data$pr_lmxi_mu,
+          sd = drm_rec$data$pr_lmxi_sd) / y
+  },
+  xlim = c(-4, -1e-16),
+  n = 501,
+  inherit.aes = FALSE,
+  color = 2,
+  lwd = 1.2)
+
+
 ##--- Viz relationships ----
 
 ## * make this into a function!
@@ -196,7 +212,9 @@ drm_rec$stanfit$draws(variables = c("zeta")) |>
 newdata_rec <- data.frame(c_tavg =
                             seq(from = quantile(dat_train$c_tavg, .05),
                                 to = quantile(dat_train$c_tavg, .95),
-                                length.out = 200))
+                                length.out = 200),
+                          c_lon = 0,
+                          c_lat = 0)
 
 rec_samples <- marg_rec(drm_rec, newdata_rec)
 
@@ -282,9 +300,9 @@ drm_surv <-
           site_col = "id",
           family = "gamma",
           seed = 202505,
-          formula_zero = ~ 1 + n_routes + c_tavg + c_lon + c_lat,
+          formula_zero = ~ 1 + n_routes,
           formula_rec = ~ 1,
-          formula_surv = ~ 1 + c_tavg + I(c_tavg * c_tavg),
+          formula_surv = ~ 1 + c_tavg + I(c_tavg * c_tavg) + c_lon + c_lat,
           n_ages = n_ages,
           adj_mat = adj_mat, ## A matrix for movement routine
           init_data = init_ldens,
@@ -365,7 +383,9 @@ drm_surv$stanfit$draws(variables = c("beta_r")) |>
 newdata_surv <- data.frame(c_tavg =
                              seq(from = quantile(dat_train$c_tavg, .05),
                                  to = quantile(dat_train$c_tavg, .95),
-                                 length.out = 200))
+                                 length.out = 200),
+                           c_lon = 0,
+                           c_lat = 0)
 
 surv_samples <- marg_surv(drm_surv, newdata_surv)
 
@@ -431,9 +451,8 @@ sdm <-
           site_col = "id",
           family = "lognormal",
           seed = 202505,
-          formula_zero = ~ 1 + n_routes +
-            c_tavg + c_lon + c_lat,
-          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg))
+          formula_zero = ~ 1 + n_routes,
+          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg) + c_lon + c_lat)
 
 ##--- forecasting ----
 
