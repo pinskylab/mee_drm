@@ -140,8 +140,7 @@ drm_rec <-
           family = "gamma",
           seed = 202505,
           formula_zero = ~ 1 + n_routes,
-          formula_rec = ~ 1 + c_lon + c_lat +
-            c_tavg + I(c_tavg * c_tavg),
+          formula_rec = ~ 1 + c_tavg + I(c_tavg * c_tavg),
           formula_surv = ~ 1,
           n_ages = 12,
           adj_mat = adj_mat, ## A matrix for movement routine
@@ -302,7 +301,7 @@ drm_surv <-
           seed = 202505,
           formula_zero = ~ 1 + n_routes,
           formula_rec = ~ 1,
-          formula_surv = ~ 1 + c_tavg + I(c_tavg * c_tavg) + c_lon + c_lat,
+          formula_surv = ~ 1 + c_tavg + I(c_tavg * c_tavg),
           n_ages = n_ages,
           adj_mat = adj_mat, ## A matrix for movement routine
           init_data = init_ldens,
@@ -452,7 +451,7 @@ sdm <-
           family = "lognormal",
           seed = 202505,
           formula_zero = ~ 1 + n_routes,
-          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg) + c_lon + c_lat)
+          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg))
 
 ##--- forecasting ----
 
