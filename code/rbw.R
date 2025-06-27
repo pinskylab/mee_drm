@@ -200,7 +200,6 @@ drm_rec$stanfit$draws(variables = c("xi")) |>
   color = 2,
   lwd = 1.2)
 
-
 ##--- Viz relationships ----
 
 ## * make this into a function!
@@ -273,7 +272,8 @@ max_quad_x(betas_rec[, 2], betas_rec[, 3],
 ## all rhat's look good (no larger than 1.01)
 drm_rec$stanfit$summary(variables = c("beta_r", "beta_t",
                                       "alpha", "sigma_t",
-                                      "zeta", "phi"))
+                                      "zeta", "phi",
+                                      "xi"))
 
 ## the different chains are in agreement and converging.
 drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
@@ -322,7 +322,8 @@ drm_surv <-
 ## all rhat's look good (no larger than 1.01)
 drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
                                        "alpha", "sigma_t",
-                                       "zeta", "phi"))
+                                       "zeta", "phi",
+                                       "xi"))
 
 ## the different chains are in agreement and converging.
 drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
@@ -376,6 +377,20 @@ drm_surv$stanfit$draws(variables = c("beta_r")) |>
                 inherit.aes = FALSE,
                 color = 2,
                 lwd = 1.2)
+
+drm_surv$stanfit$draws(variables = c("xi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) {
+    y <- - x
+    dnorm(log(y),
+          mean = drm_surv$data$pr_lmxi_mu,
+          sd = drm_surv$data$pr_lmxi_sd) / y
+  },
+  xlim = c(-4, -1e-16),
+  n = 501,
+  inherit.aes = FALSE,
+  color = 2,
+  lwd = 1.2)
 
 ##--- surv and environment ----
 
@@ -451,7 +466,8 @@ sdm <-
           family = "lognormal",
           seed = 202505,
           formula_zero = ~ 1 + n_routes,
-          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg))
+          formula_dens = ~ 1 + c_tavg + I(c_tavg * c_tavg),
+          .toggles = list(rho_mu = 0))
 
 ##--- forecasting ----
 
