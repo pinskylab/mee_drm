@@ -1,19 +1,64 @@
-## Repo for: PAPER-ID
+## `drmr`: A Bayesian approach to Dynamic Range Models in R
 
-The structure of the repository is somewhat self-explanatory.
-
-> What else do I want to add here?
-
-### Copernicus data
-
-The copernicus data was obtained using the _Copernicus Marine Service Toolbox
-Command Line Interface (CLI)_. For details on how to install it, we refer to
-this [webpage](https://pypi.org/project/copernicusmarine/).
+This repository provides the R code and data to reproduce the results for the
+paper, "`drmr`: A Bayesian approach to Dynamic Range Models in R."
 
 
-The file `north-atlantic.json` specifies the product we are downloading and the
-study region we are interested in. The latter is defined by a bounding box. To
-download the data, one should run (after installing the CLI):
-```
-copernicusmarine subset --request-file north-atlantic.json
-```
+### Installation
+
+Before running any analysis, please follow these steps to set up the required
+environment.
+
+1.  **Install CmdStan**: This project depends on `CmdStan` (version \>=
+    2.36). Please install it and the R package `cmdstanr` by following the
+    [official
+    instructions](https://mc-stan.org/cmdstanr/articles/cmdstanr.html).
+
+2.  **Restore R Environment**: This repository uses `renv` to manage R package
+    dependencies (including the version of `drmr` in the `pkg/` directory). To
+    install all required packages, open this project in R and run:y
+    ```r
+    renv::restore()
+    ```
+
+3.  **System Dependencies (Optional)**: If you wish to regenerate the raw
+    environmental data for the red-bellied woodpecker case study, you must also
+    have [GDAL](https://gdal.org/en/stable/) installed on your system. This is
+    not required if you use the provided, pre-processed data.
+
+
+### Reproducing the Results
+
+The analyses for the two case studies can be run using the scripts in the
+`code/` directory.
+
+#### Case Study 1: Summer Flounder
+
+To reproduce the full analysis for the summer flounder, run the
+`code/01-summer-flounder.R` script.y
+
+
+#### Case Study 2: Red-bellied Woodpecker
+
+For convenience, the final processed dataset for this study is already provided
+at `data/birds/processed.parquet`.
+
+  * **To run the analysis using the provided data**, execute the `code/04-rbw.R`
+    script.
+  
+  * **(Optional) To regenerate the processed data from raw sources**, run the
+    following scripts in order:
+    1.  `code/02-download-bbs.R`: Downloads Breeding Bird Survey (BBS) data via
+        the [`bbsBayes2` package](https://github.com/bbsBayes/bbsBayes2).
+    2.  `chelsa-download.sh`: A `bash` script to download and crop
+        [CHELSA](https://chelsa-climate.org/) air temperature data.
+    3.  `code/03-chelsa-env4bbs.R`: Aggregates the temperature data and creates
+        the final `processed.parquet` file.
+
+
+### Notes on Reproducibility
+
+Please be aware that results from `CmdStan` may vary slightly across different
+operating systems and hardware platforms due to minor differences in random
+number generator implementations. Full reproducibility is only guaranteed when
+using an identical computational environment.

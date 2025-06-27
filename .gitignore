@@ -4,6 +4,8 @@
 # !stan_models/utils
 # stan_models/*
 
+renv-setup.R
+  
 data/chelsa/*.tif
   
 overleaf
