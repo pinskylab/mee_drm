@@ -6,6 +6,8 @@ library(drmr)
 library(patchwork)
 library(cmdstanr)
 
+source("utils/fit_for.R")
+
 bayesplot::color_scheme_set(scheme = "mix-pink-teal")
 
 ## loading data
@@ -101,6 +103,7 @@ fmat <-
 f_train <- fmat[, years_train]
 f_test  <- fmat[, years_test]
 
+## vizualizing different beta priors
 mode_zeta <- .4
 conc_zeta1 <- 10
 conc_zeta2 <- 3.5
@@ -166,11 +169,45 @@ drm_rec <-
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
 
+##--- * code 1 ----
+
+drm_rec$stanfit$summary(variables = c("beta_r"))
+
+##--- Convergence check & parameter estimates ----
+
+## all rhat's look good (no larger than 1.01)
+drm_rec$stanfit$summary(variables = c("beta_r"))
+
+
+drm_rec$stanfit$summary(variables = c("beta_r", "beta_t",
+                                      "alpha", "sigma_t",
+                                      "xi",
+                                      "zeta", "phi"))
+
+## the different chains are in agreement and converging.
+drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
+  mcmc_trace()
+
+drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
+  mcmc_dens_overlay()
+
+drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    "xi",
+                                    "zeta", "phi")) |>
+  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
+
+drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
+                                    "xi",
+                                    "zeta", "phi")) |>
+  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
+
 ##--- comparing some priors and posteriors ----
 
 drm_rec$stanfit$draws(variables = c("phi")) |>
   mcmc_dens_overlay() +
-  stat_function(fun = \(x) dgamma(x, shape = 1, rate = .1),
+  stat_function(fun = \(x) dgamma(x,
+                                  shape = drm_rec$data$pr_phi_a,
+                                  rate = drm_rec$data$pr_phi_b),
                 xlim = c(0, 3),
                 n = 501,
                 inherit.aes = FALSE,
@@ -209,6 +246,266 @@ drm_rec$stanfit$draws(variables = c("sigma_t")) |>
                 inherit.aes = FALSE,
                 color = 2,
                 lwd = 1.2)
+
+drm_rec$stanfit$draws(variables = c("xi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) {
+    y <- - x
+    dnorm(log(y),
+          mean = drm_rec$data$pr_lmxi_mu,
+          sd = drm_rec$data$pr_lmxi_sd) / y
+  },
+  xlim = c(-5, -1e-16),
+  n = 501,
+  inherit.aes = FALSE,
+  color = 2,
+  lwd = 1.2)
+
+##--- DRM Survival ----
+
+drm_surv <-
+  fit_drm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          family = "gamma",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls,
+          formula_rec = ~ 1,
+          formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
+          f_mort = f_train,
+          n_ages = NROW(f_train),
+          adj_mat = adj_mat, ## A matrix for movement routine
+          ages_movement = c(0, 0,
+                            rep(1, 12),
+                            0, 0), ## ages allowed to move
+          .toggles = list(ar_re = "rec",
+                          est_surv = 1,
+                          movement = 1,
+                          est_init = 0,
+                          minit = 1),
+          .priors = list(pr_phi_a = 1, pr_phi_b = .1,
+                         pr_alpha_a = 4.2, pr_alpha_b = 5.8,
+                         pr_zeta_a = 7, pr_zeta_b = 3))
+
+##--- Convergence & estimates ----
+
+## r_hat for beta_s indicate convergence issues
+drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
+                                       "alpha", "sigma_t",
+                                       "xi",
+                                       "zeta", "phi"))
+
+## the different chains are in agreement and converging.
+drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
+  mcmc_trace()
+
+drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
+  mcmc_dens_overlay()
+
+drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
+                                     "xi",
+                                     "zeta", "phi")) |>
+  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
+
+drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
+                                     "xi",
+                                     "zeta", "phi")) |>
+  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
+
+##--- comparing some priors and posteriors ----
+
+drm_surv$stanfit$draws(variables = c("phi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dgamma(x,
+                                  shape = drm_surv$data$pr_phi_a,
+                                  rate = drm_surv$data$pr_phi_b),
+                xlim = c(0, 3),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_surv$stanfit$draws(variables = c("alpha")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_surv$data$pr_alpha_a,
+                                 shape2 = drm_surv$data$pr_alpha_b),
+                xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_surv$stanfit$draws(variables = c("zeta")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dbeta(x,
+                                 shape1 = drm_surv$data$pr_zeta_a,
+                                 shape2 = drm_surv$data$pr_zeta_b),
+                xlim = c(0, 1),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_surv$stanfit$draws(variables = c("sigma_t")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) dlnorm(x,
+                                  meanlog = drm_surv$data$pr_lsigma_t_mu,
+                                  sdlog = drm_surv$data$pr_lsigma_t_sd),
+                xlim = c(0, .5),
+                n = 501,
+                inherit.aes = FALSE,
+                color = 2,
+                lwd = 1.2)
+
+drm_surv$stanfit$draws(variables = c("xi")) |>
+  mcmc_dens_overlay() +
+  stat_function(fun = \(x) {
+    y <- - x
+    dnorm(log(y),
+          mean = drm_surv$data$pr_lmxi_mu,
+          sd = drm_surv$data$pr_lmxi_sd) / y
+  },
+  xlim = c(-5, -1e-16),
+  n = 501,
+  inherit.aes = FALSE,
+  color = 2,
+  lwd = 1.2)
+
+##--- SDM ----
+
+sdm <-
+  fit_sdm(.data = dat_train,
+          y_col = "dens", ## response variable: density
+          time_col = "year", ## vector of time points
+          site_col = "patch",
+          family = "lognormal",
+          seed = 202505,
+          formula_zero = ~ 1 + c_hauls,
+          formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
+          .priors = list(pr_phi_a = 1, pr_phi_b = .1,
+                         pr_alpha_a = 4.2, pr_alpha_b = 5.8),
+          ## the model is not converging with `rho_mu = 1`
+          .toggles = list(rho_mu = 0))
+
+##--- forecasting ----
+
+##--- * DRM ----
+
+forecast_rec <- predict_drm(drm = drm_rec,
+                            new_data = dat_test,
+                            past_data = filter(dat_train,
+                                               year == max(year)),
+                            seed = 125,
+                            f_test = f_test,
+                            cores = 4)
+
+forecast_surv <- predict_drm(drm = drm_surv,
+                             new_data = dat_test,
+                             past_data = filter(dat_train,
+                                                year == max(year)),
+                             seed = 125,
+                             f_test = f_test,
+                             cores = 4)
+
+forecast_sdm <-
+  predict_sdm(sdm = sdm,
+              new_data = dat_test,
+              seed = 125,
+              cores = 4)
+
+##--- Viz predicted and observed ----
+
+fitted_rec <-
+  fitted_drm(drm_rec, ci_mass = .8)
+
+for_rec <-
+  forecast_drm(forecast_rec, ci_mass = .8)
+
+for_rec <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(for_rec, by = "pair") |>
+  select(- pair)
+
+fitted_rec <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_rec, -pair))
+
+fitted_surv <-
+  fitted_drm(drm_surv, ci_mass = .8)
+
+for_surv <-
+  forecast_drm(forecast_surv, ci_mass = .8)
+
+for_surv <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(for_surv, by = "pair") |>
+  select(- pair)
+
+fitted_surv <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_surv, -pair))
+
+fitted_sdm <-
+  fitted_drm(sdm, ci_mass = .8)
+
+for_sdm <-
+  forecast_drm(forecast_sdm, ci_mass = .8)
+
+for_sdm <-
+  dat_test |>
+  select(year, patch, lat_floor, dens) |>
+  mutate(pair = row_number(), .before = 1) |>
+  left_join(for_sdm, by = "pair") |>
+  select(- pair)
+
+fitted_sdm <-
+  dat_train |>
+  select(year, patch, lat_floor, dens) |>
+  bind_cols(select(fitted_sdm, -pair))
+
+##--- Figure 2 ----
+
+bind_rows(fitted_sdm, for_sdm) |>
+  mutate(model = "SDM") |>
+  bind_rows(
+      bind_rows(fitted_rec, for_rec) |>
+      mutate(model = "DRM (rec)"),
+      bind_rows(fitted_surv, for_surv) |>
+      mutate(model = "DRM (surv)")
+  ) |>
+  ## filter(model != "DRM (surv)") |>
+  ggplot(data = _) +
+  geom_vline(xintercept = first_year_forecast,
+             lty = 2) +
+  geom_ribbon(aes(x = year,
+                  ymin = l, ymax = u,
+                  fill = model,
+                  color = model),
+              alpha = .4) +
+  geom_line(aes(x = year, y = m, color = model)) +
+  geom_point(aes(x = year, y = dens), size = .5) +
+  facet_grid(patch ~ model, scales = "free_y") +
+  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
+                                                   n = 3),
+                     trans = "log1p") +
+  theme_bw() +
+  guides(color = "none",
+         fill = "none") +
+  labs(y = "Density (in hundreds of individuals per square-km)",
+       x = "Year") +
+  theme(strip.background = element_rect(fill = "white"))
+
+ggsave(filename = "overleaf/img/forecast_sf.pdf",
+       width = 6,
+       height = 7)
 
 ##--- Viz relationships ----
 
@@ -265,96 +562,6 @@ ggsave(filename = "overleaf/img/recruitment.pdf",
        width = 6,
        height = 6 / gratio)
 
-##--- * temperature that optimizes recruitment ----
-
-betas_rec <-
-  drm_rec$stanfit$draws(variables = "beta_r",
-                         format = "matrix")
-
-max_quad_x(betas_rec[, 2], betas_rec[, 3],
-           offset = avgs["stemp"]) |>
-  apply(2, quantile, probs = c(.1, .5, .9))
-
-##--- Convergence & estimates ----
-
-## all rhat's look good (no larger than 1.01)
-drm_rec$stanfit$summary(variables = c("beta_r"))
-
-
-drm_rec$stanfit$summary(variables = c("beta_r", "beta_t",
-                                      "alpha", "sigma_t",
-                                      "xi",
-                                      "zeta", "phi"))
-
-## the different chains are in agreement and converging.
-drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
-  mcmc_trace()
-
-drm_rec$stanfit$draws(variables = c("beta_r", "beta_t")) |>
-  mcmc_dens_overlay()
-
-drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
-                                    ## "sigma_s",
-                                    "zeta", "phi")) |>
-  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
-
-drm_rec$stanfit$draws(variables = c("alpha", "sigma_t",
-                                    ## "sigma_s",
-                                    "zeta", "phi")) |>
-  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
-
-##--- DRM Survival ----
-
-drm_surv <-
-  fit_drm(.data = dat_train,
-          y_col = "dens", ## response variable: density
-          time_col = "year", ## vector of time points
-          site_col = "patch",
-          family = "gamma",
-          seed = 202505,
-          formula_zero = ~ 1 + c_hauls,
-          formula_rec = ~ 1,
-          formula_surv = ~ 1 + c_btemp + I(c_btemp * c_btemp),
-          f_mort = f_train,
-          n_ages = NROW(f_train),
-          adj_mat = adj_mat, ## A matrix for movement routine
-          ages_movement = c(0, 0,
-                            rep(1, 12),
-                            0, 0), ## ages allowed to move
-          .toggles = list(ar_re = "rec",
-                          est_surv = 1,
-                          movement = 1,
-                          est_init = 0,
-                          minit = 1),
-          .priors = list(pr_phi_a = 1, pr_phi_b = .1,
-                         pr_alpha_a = 4.2, pr_alpha_b = 5.8,
-                         pr_zeta_a = 7, pr_zeta_b = 3))
-
-##--- Convergence & estimates ----
-
-## r_hat for beta_s indicate convergence issues
-drm_surv$stanfit$summary(variables = c("beta_s", "beta_t",
-                                       "alpha", "sigma_t",
-                                       "xi",
-                                       "zeta", "phi"))
-
-## the different chains are in agreement and converging.
-drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
-  mcmc_trace()
-
-drm_surv$stanfit$draws(variables = c("beta_s", "beta_t")) |>
-  mcmc_dens_overlay()
-
-drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
-                                     "xi",
-                                     "zeta", "phi")) |>
-  mcmc_trace(facet_args = list(labeller = ggplot2::label_parsed))
-
-drm_surv$stanfit$draws(variables = c("alpha", "sigma_t",
-                                     "xi",
-                                     "zeta", "phi")) |>
-  mcmc_dens_overlay(facet_args = list(labeller = ggplot2::label_parsed))
-
 ##--- surv and environment ----
 
 newdata_surv <- data.frame(c_btemp =
@@ -397,6 +604,7 @@ ggsave(filename = "overleaf/img/surv.pdf",
        width = 6,
        height = 6 / gratio)
 
+##--- Figure 3 ----
 ##--- Panel for recruitment and survival ----
 
 rec_fig + surv_fig +
@@ -407,7 +615,17 @@ ggsave(filename = "overleaf/img/rec_surv.pdf",
        width = 7,
        height = .75 * 7 / gratio)
 
-##--- ** obtaining the SBT that maximizes surival ----
+##--- ** SST that optimizes recruitment ----
+
+betas_rec <-
+  drm_rec$stanfit$draws(variables = "beta_r",
+                         format = "matrix")
+
+max_quad_x(betas_rec[, 2], betas_rec[, 3],
+           offset = avgs["stemp"]) |>
+  apply(2, quantile, probs = c(.1, .5, .9))
+
+##--- ** SBT that maximizes surival ----
 
 betas_surv <-
   drm_surv$stanfit$draws(variables = "beta_s",
@@ -417,222 +635,7 @@ max_quad_x(betas_surv[, 2], betas_surv[, 3],
            offset = avgs["btemp"]) |>
   apply(2, quantile, probs = c(.1, .5, .9))
 
-##--- * SDM ----
-
-sdm <-
-  fit_sdm(.data = dat_train,
-          y_col = "dens", ## response variable: density
-          time_col = "year", ## vector of time points
-          site_col = "patch",
-          family = "lognormal",
-          seed = 202505,
-          formula_zero = ~ 1 + c_hauls,
-          formula_dens = ~ 1 + c_stemp + I(c_stemp * c_stemp),
-          .priors = list(pr_phi_a = 1, pr_phi_b = .1,
-                         pr_alpha_a = 4.2, pr_alpha_b = 5.8),
-          .toggles = list(rho_mu = 0))
-
-##--- forecasting ----
-
-##--- * DRM ----
-
-forecast_rec <- predict_drm(drm = drm_rec,
-                            new_data = dat_test,
-                            past_data = filter(dat_train,
-                                               year == max(year)),
-                            seed = 125,
-                            f_test = f_test,
-                            cores = 4)
-
-forecast_surv <- predict_drm(drm = drm_surv,
-                             new_data = dat_test,
-                             past_data = filter(dat_train,
-                                                year == max(year)),
-                             seed = 125,
-                             f_test = f_test,
-                             cores = 4)
-
-forecast_sdm <-
-  predict_sdm(sdm = sdm,
-              new_data = dat_test,
-              seed = 125,
-              cores = 4)
-
-##--- Viz predicted and observed ----
-
-fitted_rec <-
-  drm_rec$stanfit$draws(variables = "y_pp",
-                        format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_pp"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05),
-            l = quantile(expected, probs = .1),
-            m = median(expected),
-            u = quantile(expected, probs = .9),
-            uu = quantile(expected, probs = .95)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_rec <-
-  forecast_rec$draws(variables = "y_proj",
-                     format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_proj"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05),
-            l = quantile(expected, probs = .1),
-            m = median(expected),
-            u = quantile(expected, probs = .9),
-            uu = quantile(expected, probs = .95)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_rec <-
-  dat_test |>
-  select(year, patch, lat_floor, dens) |>
-  mutate(pair = row_number(), .before = 1) |>
-  left_join(for_rec, by = "pair") |>
-  select(- pair)
-
-fitted_rec <-
-  dat_train |>
-  select(year, patch, lat_floor, dens) |>
-  bind_cols(select(fitted_rec, -pair))
-
-fitted_surv <-
-  drm_surv$stanfit$draws(variables = "y_pp",
-                         format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_pp"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05),
-            l = quantile(expected, probs = .1),
-            m = median(expected),
-            u = quantile(expected, probs = .9),
-            uu = quantile(expected, probs = .95)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_surv <-
-  forecast_surv$draws(variables = "y_proj",
-                      format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_proj"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05, na.rm = TRUE),
-            l = quantile(expected, probs = .1, na.rm = TRUE),
-            m = median(expected, na.rm = TRUE),
-            u = quantile(expected, probs = .9, na.rm = TRUE),
-            uu = quantile(expected, probs = .95, na.rm = TRUE)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_surv <-
-  dat_test |>
-  select(year, patch, lat_floor, dens) |>
-  mutate(pair = row_number(), .before = 1) |>
-  left_join(for_surv, by = "pair") |>
-  select(- pair)
-
-fitted_surv <-
-  dat_train |>
-  select(year, patch, lat_floor, dens) |>
-  bind_cols(select(fitted_surv, -pair))
-
-fitted_sdm <-
-  sdm$stanfit$draws(variables = "y_pp",
-                       format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_pp"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05),
-            l = quantile(expected, probs = .1),
-            m = median(expected),
-            u = quantile(expected, probs = .9),
-            uu = quantile(expected, probs = .95)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_sdm <-
-  forecast_sdm$draws(variables = "y_proj",
-                     format = "draws_df") |>
-  tidyr::pivot_longer(cols = starts_with("y_proj"),
-                      names_to = "pair",
-                      values_to = "expected") |>
-  group_by(pair) |>
-  summarise(ll = quantile(expected, probs = .05),
-            l = quantile(expected, probs = .1),
-            m = median(expected),
-            u = quantile(expected, probs = .9),
-            uu = quantile(expected, probs = .95)) |>
-  ungroup() |>
-  mutate(pair = gsub("\\D", "", pair)) |>
-  mutate(pair = as.integer(pair)) |>
-  arrange(pair)
-
-for_sdm <-
-  dat_test |>
-  select(year, patch, lat_floor, dens) |>
-  mutate(pair = row_number(), .before = 1) |>
-  left_join(for_sdm, by = "pair") |>
-  select(- pair)
-
-fitted_sdm <-
-  dat_train |>
-  select(year, patch, lat_floor, dens) |>
-  bind_cols(select(fitted_sdm, -pair))
-
-##--- Figure 1 ----
-
-bind_rows(fitted_sdm, for_sdm) |>
-  mutate(model = "SDM") |>
-  bind_rows(
-      bind_rows(fitted_rec, for_rec) |>
-      mutate(model = "DRM (rec)"),
-      bind_rows(fitted_surv, for_surv) |>
-      mutate(model = "DRM (surv)")
-  ) |>
-  ## filter(model != "DRM (surv)") |>
-  ggplot(data = _) +
-  geom_vline(xintercept = first_year_forecast,
-             lty = 2) +
-  geom_ribbon(aes(x = year,
-                  ymin = l, ymax = u,
-                  fill = model,
-                  color = model),
-              alpha = .4) +
-  geom_line(aes(x = year, y = m, color = model)) +
-  geom_point(aes(x = year, y = dens), size = .5) +
-  facet_grid(patch ~ model, scales = "free_y") +
-  scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
-                                                   n = 3),
-                     trans = "log1p") +
-  theme_bw() +
-  guides(color = "none",
-         fill = "none") +
-  labs(y = "Density (in hundreds of individuals per square-km)",
-       x = "Year") +
-  theme(strip.background = element_rect(fill = "white"))
-
-ggsave(filename = "overleaf/img/forecast_sf.pdf",
-       width = 6,
-       height = 7)
+##--- Table 4 ----
 
 for_sdm |>
   mutate(model = "SDM") |>
@@ -659,3 +662,4 @@ for_sdm |>
   xtable::xtable(caption = "Forecasting skill according to different metrics",
                  digits = 2) |>
   print(include.rownames = FALSE)
+
