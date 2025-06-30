@@ -62,3 +62,22 @@ Please be aware that results from `CmdStan` may vary slightly across different
 operating systems and hardware platforms due to minor differences in random
 number generator implementations. Full reproducibility is only guaranteed when
 using an identical computational environment.
+
+#### System information
+
+The analyses were conducted on a macOS machine with the following specifications:
+
+  * **Processor**: Apple M2 Pro
+  * **Memory**: 16GB RAM
+
+The R session information is provided below for full reproducibility.
+```
+> sessionInfo()
+#> R version 4.4.1 (2024-06-14)
+#> Platform: aarch64-apple-darwin20
+#> Running under: macOS 15.5
+#>
+#> Matrix products: default
+#> BLAS:   /System/Library/Frameworks/Accelerate.framework/Versions/A/Frameworks/vecLib.framework/Vers#> ions/A/libBLAS.dylib 
+#> LAPACK: /Library/Frameworks/R.framework/Versions/4.4-arm64/Resources/lib/libRlapack.dylib;  LAPACK version 3.12.0
+```
