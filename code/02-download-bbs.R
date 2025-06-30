@@ -48,7 +48,8 @@ st_write(c_hull_pts, dsn = "data/birds/shape/window.shp")
 states <-
   rnaturalearth::ne_states(
                      country = c("United States of America"),
-                     returnclass = "sf"
+                     returnclass = "sf",
+                     spat_object = rnaturalearthhires::states10
                  ) |>
   st_transform("epsg:4326")
 

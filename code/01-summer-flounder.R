@@ -6,8 +6,6 @@ library(drmr)
 library(patchwork)
 library(cmdstanr)
 
-source("utils/fit_for.R")
-
 bayesplot::color_scheme_set(scheme = "mix-pink-teal")
 
 ## loading data
@@ -168,10 +166,6 @@ drm_rec <-
           .priors = list(pr_phi_a = 1, pr_phi_b = .1,
                          pr_alpha_a = 4.2, pr_alpha_b = 5.8,
                          pr_zeta_a = 7, pr_zeta_b = 3))
-
-##--- * code 1 ----
-
-drm_rec$stanfit$summary(variables = c("beta_r"))
 
 ##--- Convergence check & parameter estimates ----
 
@@ -417,11 +411,26 @@ forecast_sdm <-
 
 ##--- Viz predicted and observed ----
 
+ci_mass <- .8
+tails <- 1 - ci_mass
+l_t <- tails * .5
+u_t <- 1 - .5 * tails
+
 fitted_rec <-
-  fitted_drm(drm_rec, ci_mass = .8)
+  drm_rec$stanfit$summary(variables = "y_pp", "median",
+                          \(x) posterior::quantile2(x, probs = c(l_t, u_t))) |>
+  mutate(pair = gsub("\\D", "", variable),
+         .before = "variable") |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
 
 for_rec <-
-  forecast_drm(forecast_rec, ci_mass = .8)
+  forecast_rec$summary(variables = "y_proj", "median",
+                       \(x) posterior::quantile2(x, probs = c(l_t, u_t))) |>
+  mutate(pair = gsub("\\D", "", variable),
+         .before = "variable") |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
 
 for_rec <-
   dat_test |>
@@ -436,10 +445,20 @@ fitted_rec <-
   bind_cols(select(fitted_rec, -pair))
 
 fitted_surv <-
-  fitted_drm(drm_surv, ci_mass = .8)
+  drm_surv$stanfit$summary(variables = "y_pp", "median",
+                           \(x) posterior::quantile2(x, probs = c(l_t, u_t))) |>
+  mutate(pair = gsub("\\D", "", variable),
+         .before = "variable") |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
 
 for_surv <-
-  forecast_drm(forecast_surv, ci_mass = .8)
+  forecast_surv$summary(variables = "y_proj", "median",
+                        \(x) posterior::quantile2(x, probs = c(l_t, u_t))) |>
+  mutate(pair = gsub("\\D", "", variable),
+         .before = "variable") |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
 
 for_surv <-
   dat_test |>
@@ -454,10 +473,20 @@ fitted_surv <-
   bind_cols(select(fitted_surv, -pair))
 
 fitted_sdm <-
-  fitted_drm(sdm, ci_mass = .8)
+  sdm$stanfit$summary(variables = "y_pp", "median",
+                      \(x) posterior::quantile2(x, probs = c(l_t, u_t))) |>
+  mutate(pair = gsub("\\D", "", variable),
+         .before = "variable") |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
 
 for_sdm <-
-  forecast_drm(forecast_sdm, ci_mass = .8)
+  forecast_sdm$summary(variables = "y_proj", "median",
+                        \(x) posterior::quantile2(x, probs = c(l_t, u_t))) |>
+  mutate(pair = gsub("\\D", "", variable),
+         .before = "variable") |>
+  mutate(pair = as.integer(pair)) |>
+  arrange(pair)
 
 for_sdm <-
   dat_test |>
@@ -486,11 +515,11 @@ bind_rows(fitted_sdm, for_sdm) |>
   geom_vline(xintercept = first_year_forecast,
              lty = 2) +
   geom_ribbon(aes(x = year,
-                  ymin = l, ymax = u,
+                  ymin = q10, ymax = q90,
                   fill = model,
                   color = model),
               alpha = .4) +
-  geom_line(aes(x = year, y = m, color = model)) +
+  geom_line(aes(x = year, y = median, color = model)) +
   geom_point(aes(x = year, y = dens), size = .5) +
   facet_grid(patch ~ model, scales = "free_y") +
   scale_y_continuous(breaks = scales::trans_breaks(identity, identity,
@@ -527,11 +556,9 @@ rec_samples <- rec_samples |>
 rec_summary <-
   rec_samples |>
   group_by(stemp) |>
-  summarise(ll = quantile(recruitment, probs = .05),
-            l = quantile(recruitment, probs = .1),
+  summarise(l = quantile(recruitment, probs = .1),
             m = median(recruitment),
-            u = quantile(recruitment, probs = .9),
-            uu = quantile(recruitment, probs = .95)) |>
+            u = quantile(recruitment, probs = .9)) |>
   ungroup() |>
   mutate(model = "drm_rec")
 
@@ -577,11 +604,9 @@ surv_samples <- surv_samples |>
 surv_summary <-
   surv_samples |>
   group_by(btemp) |>
-  summarise(ll = quantile(survival, probs = .05),
-            l = quantile(survival, probs = .1),
+  summarise(l = quantile(survival, probs = .1),
             m = median(survival),
-            u = quantile(survival, probs = .9),
-            uu = quantile(survival, probs = .95)) |>
+            u = quantile(survival, probs = .9)) |>
   ungroup()
 
 surv_fig <-
@@ -645,10 +670,10 @@ for_sdm |>
       for_surv |>
       mutate(model = "DRM (surv)")
   ) |>
-  mutate(bias = dens - m) |>
+  mutate(bias = dens - median) |>
   mutate(rmse = bias * bias) |>
-  mutate(is = int_score(dens, l = l, u = u, alpha = .2)) |>
-  mutate(cvg = 100 * data.table::between(dens, l, u)) |>
+  mutate(is = int_score(dens, l = q10, u = q90, alpha = .2)) |>
+  mutate(cvg = 100 * data.table::between(dens, q10, q90)) |>
   ungroup() |>
   group_by(model) |>
   summarise(across(rmse:cvg, mean)) |>
@@ -662,4 +687,3 @@ for_sdm |>
   xtable::xtable(caption = "Forecasting skill according to different metrics",
                  digits = 2) |>
   print(include.rownames = FALSE)
-
