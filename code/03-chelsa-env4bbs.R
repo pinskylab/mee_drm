@@ -1,16 +1,11 @@
 library(dplyr)
 library(sf)
 library(terra)
-library(arrow)
-library(geoarrow)
 library(ggplot2)
 
-my_dt <- open_dataset("data/birds/no_env.parquet") |>
-  st_as_sf()
+my_dt <- readRDS("data/birds/no_env.rds")
 
-my_map <- my_dt |>
-  filter(year == 1980) |>
-  select(id)
+my_map <- st_read("data/birds/shape/grid.shp")
 
 my_vec <- vect(my_map)
 
@@ -52,11 +47,10 @@ my_dt <-
 my_dt <-
   my_dt |>
   mutate(tavg = tavg / 10 - 273.15) |>
-  mutate(fahrenreit = tavg * 1.8 + 32,
-         .before = geometry)
+  mutate(fahrenreit = tavg * 1.8 + 32)
 
 my_dt <- my_dt |>
   mutate(id = as.integer(factor(id))) |>
   arrange(id, year)
 
-write_dataset(my_dt, "data/birds/processed.parquet")
+saveRDS(my_dt, "data/birds/processed.rds")

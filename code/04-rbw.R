@@ -5,35 +5,30 @@ library(sf)
 library(drmr)
 library(patchwork)
 library(cmdstanr)
-library(arrow)
-library(geoarrow)
 
 bayesplot::color_scheme_set(scheme = "mix-pink-teal")
 
 ## loading data
-my_dt <- open_dataset("data/birds/processed.parquet") |>
-  st_as_sf()
+my_dt <- readRDS("data/birds/processed.rds")
+
+my_map <- st_read("data/birds/shape/grid.shp") |>
+  mutate(lon = st_coordinates(st_centroid(geometry))[, 1],
+         lat = st_coordinates(st_centroid(geometry))[, 2],
+         .before = "geometry")
 
 my_dt <- my_dt |>
-  mutate(id = as.integer(factor(id)),
-         lon = st_coordinates(st_centroid(geometry))[, 1],
-         lat = st_coordinates(st_centroid(geometry))[, 2]) |>
-  arrange(id, year)
+  mutate(id = as.integer(factor(id)),) |>
+  arrange(id, year) |>
+  left_join(select(st_drop_geometry(my_map),
+                 - area), by = "id")
 
-map <- my_dt |>
-  filter(year == max(year)) |>
-  select(id) |>
-  distinct()
-
-polygons <- map |>
+polygons <- my_map |>
   st_geometry()
 
 polygons |>
   st_area() |>
   units::set_units("km^2") |>
   summary()
-
-my_dt <- st_drop_geometry(my_dt)
 
 ##--- splitting data for validation ----
 
@@ -89,24 +84,14 @@ dat_test <- dat_test |>
 chains <- 4
 cores <- 4
 
-##--- fig 1 ----
+##--- viz ap ----
 
-world <-
-  rnaturalearth::ne_countries(scale = "medium", returnclass = "sf")
-
-filter <- st_bbox(map) |>
-  st_as_sfc()
-
-bk <- st_intersection(world, filter) |>
-  st_as_sfc()
-
-map |>
+my_map |>
   left_join(filter(dat_train, year == 2011),
             by = "id") |>
   ggplot(data = _,
          aes(fill = dens)) +
-  geom_sf(data = bk, inherit.aes = FALSE) +
-  geom_sf(alpha = .8) +
+  geom_sf(alpha = .9) +
   scale_fill_viridis_c(option = "H") +
   theme_bw()
 

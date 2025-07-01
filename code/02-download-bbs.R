@@ -1,8 +1,6 @@
 library(bbsBayes2)
 library(sf)
 library(dplyr)
-library(arrow)
-library(geoarrow)
 
 ##--- selecting species ----
 
@@ -91,7 +89,6 @@ filter_grid <-
                 states_merged,
                 sparse = FALSE)
 
-
 plot(my_grid[filter_grid[, 1], ],
      col = scales::alpha(4, .2),
      add = TRUE)
@@ -112,13 +109,18 @@ my_grid <-
   st_cast("POLYGON") |>
   filter(st_area(x) > quantile(st_area(my_grid), .3)) |>
   mutate(id = row_number(),
-         .before = x)
+         .before = x) |>
+  mutate(area = units::drop_units(units::set_units(st_area(x),
+                                                   "km^2")),
+         .before = "x")
 
 st_geometry(my_grid) <- "geometry"
 
 rownames(my_grid) <- NULL
 
 my_map <- my_grid
+
+st_write(obj = my_map, "data/birds/shape/grid.shp")
 
 year_id <- expand.grid(id = my_grid$id,
                        year = sort(unique(my_dt$year)))
@@ -132,8 +134,10 @@ my_grid <- st_join(my_grid,
   filter(!is.na(year)) |>
   st_drop_geometry()
 
+rownames(my_grid) <- NULL
+
 my_grid <- my_grid |>
-  group_by(id, year,
+  group_by(id, year, 
            .drop = FALSE) |>
   summarise(count = sum(count, na.rm = TRUE),
             n_routes = sum(n_routes, na.rm = TRUE),
@@ -154,18 +158,9 @@ my_grid <- my_grid |>
   mutate(across(count:non_zero_weight,
                 .fns = \(x) tidyr::replace_na(x, 0)))
 
-my_grid <- left_join(my_map, my_grid,
-                     by = c("id"))
-
 my_grid <- my_grid |>
-  mutate(area = units::drop_units(units::set_units(st_area(geometry), "km^2")))
-
-my_grid <- my_grid |>
+  left_join(st_drop_geometry(my_map),
+            by = "id") |>
   mutate(y = count / area)
 
-my_grid |>
-  filter(year == "2019") |>
-  select(y) |>
-  plot()
-
-write_dataset(my_grid, "data/birds/no_env.parquet")
+saveRDS(my_grid, "data/birds/no_env.rds")
