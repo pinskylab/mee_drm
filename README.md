@@ -23,8 +23,9 @@ environment.
 
 3.  **System Dependencies (Optional)**: If you wish to regenerate the raw
     environmental data for the red-bellied woodpecker case study, you must also
-    have [GDAL](https://gdal.org/en/stable/) installed on your system. This is
-    not required if you use the provided, pre-processed data.
+    have the `bash` interface to [GDAL](https://gdal.org/en/stable/) set up in
+    your system. This is not required if you use the provided, pre-processed
+    data.
 
 
 ### Reproducing the Results
