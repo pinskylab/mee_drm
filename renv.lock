@@ -570,6 +570,7 @@
       "URL": "https://mc-stan.org/cmdstanr/, https://discourse.mc-stan.org",
       "BugReports": "https://github.com/stan-dev/cmdstanr/issues",
       "Encoding": "UTF-8",
+      "LazyData": "true",
       "RoxygenNote": "7.3.2",
       "Roxygen": "list(markdown = TRUE, r6 = FALSE)",
       "SystemRequirements": "CmdStan (https://mc-stan.org/users/interfaces/cmdstan)",
@@ -588,6 +589,7 @@
       ],
       "Suggests": [
         "bayesplot",
+        "fs",
         "ggplot2",
         "knitr (>= 1.37)",
         "loo (>= 2.0.0)",
@@ -596,15 +598,14 @@
         "Rcpp"
       ],
       "VignetteBuilder": "knitr",
+      "Author": "Jonah Gabry [aut], Rok Češnovar [aut], Andrew Johnson [aut, cre] (<https://orcid.org/0000-0001-7000-8065>), Steve Bronder [aut], Ben Bales [ctb], Mitzi Morris [ctb], Mikhail Popov [ctb], Mike Lawrence [ctb], William Michael Landau [ctb] (<https://orcid.org/0000-0003-1878-3253>), Jacob Socolar [ctb], Martin Modrák [ctb], Ven Popov [ctb]",
+      "Maintainer": "Andrew Johnson <andrew.johnson@arjohnsonau.com>",
       "RemoteType": "github",
       "RemoteHost": "api.github.com",
-      "RemoteRepo": "cmdstanr",
       "RemoteUsername": "stan-dev",
-      "RemoteRef": "exe-w-include_paths",
-      "RemoteSha": "989ddaf4276d9c6d4b264683955e7a831e43e195",
-      "NeedsCompilation": "no",
-      "Author": "Jonah Gabry [aut], Rok Češnovar [aut], Andrew Johnson [aut, cre] (<https://orcid.org/0000-0001-7000-8065>), Steve Bronder [aut], Ben Bales [ctb], Mitzi Morris [ctb], Mikhail Popov [ctb], Mike Lawrence [ctb], William Michael Landau [ctb] (<https://orcid.org/0000-0003-1878-3253>), Jacob Socolar [ctb], Martin Modrák [ctb], Ven Popov [ctb]",
-      "Maintainer": "Andrew Johnson <andrew.johnson@arjohnsonau.com>"
+      "RemoteRepo": "cmdstanr",
+      "RemoteRef": "master",
+      "RemoteSha": "5f2a8c850890e54e6fccc8108e5a31cb08010ab8"
     },
     "colorspace": {
       "Package": "colorspace",
@@ -1223,8 +1224,8 @@
     },
     "instantiate": {
       "Package": "instantiate",
-      "Version": "0.2.3.9002",
-      "Source": "GitHub",
+      "Version": "0.2.3",
+      "Source": "Repository",
       "Title": "Pre-Compiled 'CmdStan' Models in R Packages",
       "Description": "Similar to 'rstantools' for 'rstan', the 'instantiate' package builds pre-compiled 'CmdStan' models into CRAN-ready statistical modeling R packages. The models compile once during installation, the executables live inside the file systems of their respective packages, and users have the full power and convenience of 'cmdstanr' without any additional compilation after package installation. This approach saves time and helps R package developers migrate from 'rstan' to the more modern 'cmdstanr'. Packages 'rstantools', 'cmdstanr', 'stannis', and 'stanapi' are similar Stan clients with different objectives.",
       "License": "MIT + file LICENSE",
@@ -1250,17 +1251,11 @@
       "Encoding": "UTF-8",
       "Language": "en-US",
       "Config/testthat/edition": "3",
-      "Roxygen": "list(markdown = TRUE)",
       "RoxygenNote": "7.3.2",
-      "RemoteType": "github",
-      "RemoteHost": "api.github.com",
-      "RemoteRepo": "instantiate",
-      "RemoteUsername": "wlandau",
-      "RemoteRef": "HEAD",
-      "RemoteSha": "a77f06f7c849bf028cdd08a3c3bbbdd375c46d1c",
       "NeedsCompilation": "yes",
       "Author": "William Michael Landau [aut, cre] (<https://orcid.org/0000-0003-1878-3253>), Eli Lilly and Company [cph, fnd]",
-      "Maintainer": "William Michael Landau <will.landau.oss@gmail.com>"
+      "Maintainer": "William Michael Landau <will.landau.oss@gmail.com>",
+      "Repository": "CRAN"
     },
     "isoband": {
       "Package": "isoband",
